@@ -208,6 +208,10 @@ func _process(delta: float) -> void:
 			bio += 0.6
 			if b.hp <= 0.0:
 				b.dying = 0.6
+	for pod in pods:
+		if pod.t_left <= 0.0 and nodes.has("creep") and randf() < 0.25 and not pod.b.dead:
+			pods.append({"b": pod.b, "p": pod.p + Vector2(randf_range(-14, 14), randf_range(-14, 14)),
+				"t_left": 6.0, "tick": 0.5})
 	pods = pods.filter(func(p): return p.t_left > 0.0 and not p.b.dead)
 	# biomass threshold -> evolution draft
 	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
@@ -217,7 +221,7 @@ func _process(delta: float) -> void:
 		_tendrils(delta)
 		_people(delta)
 		_army(delta)
-		threat = min(100.0, threat + 0.55 * delta)
+		threat = min(100.0, threat + 0.22 * delta)
 		tier = mini(5, int(threat / 17.0))
 		_check_end()
 	for b in buildings:
@@ -271,32 +275,73 @@ func _people(delta: float) -> void:
 	people = people.filter(func(p): return not p.get("dead", false))
 
 # --- tendril + evolution state ---
-const TENDRIL_RANGE := 100.0
-const BIO_THRESH := [60.0, 160.0, 300.0]
+const BIO_THRESH := [180.0, 520.0, 1100.0]
+var tendril_range := 100.0
 var aim := Vector2.ZERO          # clamped world aim point
 var aim_clamped := false
 var feeding := false             # LMB held
 var chew_target = null           # building dict or null
 var chewing := false             # actually biting something this frame
-var evo := {"ironmaw": 0, "gorehook": 0, "spore": 0}
+# evolution tree: first pick locks the branch, later picks buy nodes inside it
+var branch := ""                 # "", "ironmaw", "gorehook", "spore"
+var nodes := {}                  # node id -> true
 var bio := 0.0
 var bio_stage := 0
 var draft_open := false
 var draft_layer: CanvasLayer = null
 var pods: Array = []             # {b, p(local), t_left, tick}
+var rmb_cd := 0.0
+var lash := {"t_left": 0.0, "ang": 0.0}
+var slams: Array = []            # {x, dir, dist}
+var aftershock_q: Array = []     # {p, t_left}
+var max_grabs := 1
+var dmg_taken_mult := 1.0
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
+	rmb_cd -= delta
+	lash.t_left = maxf(0.0, lash.t_left - delta)
 	var mouse := get_global_mouse_position()
 	var to_m := mouse - pos
-	aim_clamped = to_m.length() > TENDRIL_RANGE
-	aim = pos + to_m.limit_length(TENDRIL_RANGE)
+	aim_clamped = to_m.length() > tendril_range
+	aim = pos + to_m.limit_length(tendril_range)
 	feeding = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not over
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and not over:
+		_rmb_active()
+	# queued aftershocks
+	for q in aftershock_q:
+		q.t_left -= delta
+		if q.t_left <= 0.0:
+			_shockwave(q.p, 30.0)
+	aftershock_q = aftershock_q.filter(func(q): return q.t_left > 0.0)
+	# seismic slam waves travel the street
+	for s in slams:
+		s.dist += 240.0 * delta
+		var wx: float = s.x + s.dir * s.dist
+		for u in units:
+			if u.kind != "heli" and absf(u.pos.x - wx) < 14.0 and not u.get("slammed", false):
+				u.slammed = true
+				u.hp = u.get("hp", 1) - 2
+				u.fall = true
+				u.vy = -80.0
+				u.pos.y = -20.0
+				if u.hp <= 0:
+					u.dead = true
+					_kill_unit(u)
+		for b in buildings:
+			if b.dead or b.dying > 0.0:
+				continue
+			if wx >= b.x and wx <= b.x + b.w and randf() < 0.5:
+				_carve(b, Vector2(wx, -randf_range(4, 22)), 5.0)
+				b.hp -= 2.0
+				if b.hp <= 0.0:
+					b.dying = 0.6
+		if randf() < 0.8:
+			parts.append({"pos": Vector2(wx, -2), "vel": Vector2(0, randf_range(-60, -20)),
+				"life": 0.4, "col": Color(0.5, 0.4, 0.45), "size": 2.5})
+	slams = slams.filter(func(s): return s.dist < 150.0)
 	chewing = false
 	chew_target = null
-	# gorehook grapple: RMB pulls YOU toward the aim point
-	if evo.gorehook > 0 and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-		vel += (aim - pos).normalized() * 2000.0 * delta
 	if not feeding:
 		# release: drop everything held (falls, fall damage)
 		for u in units:
@@ -305,17 +350,24 @@ func _tendrils(delta: float) -> void:
 				u.fall = true
 				u.vy = 0.0
 	else:
-		# 1) grab a unit near the aim point
-		var grabbed_someone := false
+		# 1) grab units near the aim point (cap by evolution)
+		var grabbed_n := 0
 		for u in units:
 			if u.get("grab", false):
-				grabbed_someone = true
+				grabbed_n += 1
+		var grabbed_someone := grabbed_n > 0
+		for u in units:
+			if grabbed_n >= max_grabs:
+				break
+			if u.get("grab", false):
 				continue
 			if (u.pos + Vector2(0, -8)).distance_to(aim) < 17.0:
 				u.grab = true
 				u.fall = false
+				u.thrown = false
 				combo_idle = 0.0
 				grabbed_someone = true
+				grabbed_n += 1
 		# 2) snatch a person
 		if not grabbed_someone:
 			for p in people:
@@ -341,8 +393,18 @@ func _tendrils(delta: float) -> void:
 				chewing = true
 				_chew(b, delta)
 				break
-	# reel grabbed units in — smashing through buildings on the way
+	# reel / throw / fall — units smashing through buildings on the way
+	var crash_dmg: float = 9.0 if nodes.has("flenser") else 4.0
 	for u in units:
+		if u.get("thrown", false):
+			u.pos += u.tvel * delta
+			u.tvel.y += 260.0 * delta
+			u.crash_cd = maxf(0.0, u.get("crash_cd", 0.0) - delta)
+			_unit_crash_buildings(u, crash_dmg * 2.0)
+			if u.pos.y >= 0.0 or u.pos.x < 40 or u.pos.x > WORLD_W - 40:
+				u.dead = true
+				_kill_unit(u)
+			continue
 		if u.get("fall", false):
 			u.vy += 300.0 * delta
 			u.pos.y += u.vy * delta
@@ -358,28 +420,9 @@ func _tendrils(delta: float) -> void:
 				u.vy = 0.0
 		if not u.get("grab", false):
 			continue
-		var reel: float = (60.0 if u.kind == "tank" else 110.0) * (2.2 if evo.gorehook > 0 else 1.0)
+		var reel: float = (60.0 if u.kind == "tank" else 110.0) * (2.2 if branch == "gorehook" else 1.0)
 		u.crash_cd = maxf(0.0, u.get("crash_cd", 0.0) - delta)
-		# collide with buildings along the reel path
-		var blocked := false
-		for b in buildings:
-			if b.dead or b.dying > 0.0:
-				continue
-			var upos: Vector2 = u.pos + Vector2(0, -8)
-			if upos.x >= b.x and upos.x <= b.x + b.w and upos.y >= -b.cur_h and upos.y <= 0.0:
-				blocked = true
-				if u.crash_cd <= 0.0:
-					u.crash_cd = 0.08
-					_carve(b, upos, 8.0)
-					b.hp -= 4.0
-					b.holes.append({"p": upos - Vector2(b.x, -b.h), "o": randf() * TAU})
-					_chunks(upos, 3)
-					_boom(upos, 4, Color("#7a6a7a"), 80.0)
-					shake = maxf(shake, 3.0)
-					score_f += 6.0 * combo * TIER_MULT[tier]
-					if b.hp <= 0.0:
-						b.dying = 0.6
-				break
+		var blocked := _unit_crash_buildings(u, crash_dmg)
 		u.pos = u.pos.move_toward(pos, reel * delta * (0.45 if blocked else 1.0))
 		if u.pos.distance_to(pos) < radius + 2.0:
 			u.dead = true
@@ -390,8 +433,115 @@ func _tendrils(delta: float) -> void:
 		if combo_idle > 1.2 and combo > 1.0:
 			combo = max(1.0, combo - 1.6 * delta)
 
+func _unit_crash_buildings(u: Dictionary, dmg: float) -> bool:
+	var upos: Vector2 = u.pos + Vector2(0, -8)
+	for b in buildings:
+		if b.dead or b.dying > 0.0:
+			continue
+		if upos.x >= b.x and upos.x <= b.x + b.w and upos.y >= -b.cur_h and upos.y <= 0.0:
+			if u.get("crash_cd", 0.0) <= 0.0:
+				u.crash_cd = 0.08
+				_carve(b, upos, 8.0)
+				b.hp -= dmg
+				b.holes.append({"p": upos - Vector2(b.x, -b.h), "o": randf() * TAU})
+				_chunks(upos, 3)
+				_boom(upos, 4, Color("#7a6a7a"), 80.0)
+				shake = maxf(shake, 3.0)
+				score_f += 6.0 * combo * TIER_MULT[tier]
+				if b.hp <= 0.0:
+					b.dying = 0.6
+			return true
+	return false
+
+func _rmb_active() -> void:
+	if nodes.has("seismic"):
+		rmb_cd = 2.5
+		shake = 10.0
+		_boom(Vector2(pos.x, -4), 14, Color(0.6, 0.5, 0.55), 90.0)
+		slams.append({"x": pos.x, "dir": 1.0, "dist": 0.0})
+		slams.append({"x": pos.x, "dir": -1.0, "dist": 0.0})
+		for u in units:
+			u.slammed = false
+	elif nodes.has("sling"):
+		var thrown_one := false
+		for u in units:
+			if u.get("grab", false):
+				u.grab = false
+				u.thrown = true
+				u.tvel = (aim - u.pos).normalized() * 320.0
+				thrown_one = true
+				break
+		if thrown_one:
+			rmb_cd = 0.5
+			shake = 5.0
+		else:
+			rmb_cd = 0.9
+			vel += (aim - pos).normalized() * 340.0   # grapple zip
+	elif nodes.has("burst") and pods.size() > 0:
+		rmb_cd = 1.0
+		for pod in pods:
+			var b: Dictionary = pod.b
+			var world: Vector2 = Vector2(b.x, -b.h) + pod.p
+			if not b.dead:
+				_carve(b, world, 11.0)
+				_carve(b, world + Vector2(randf_range(-6, 6), randf_range(-6, 6)), 7.0)
+				b.hp -= 22.0
+				if b.hp <= 0.0 and b.dying <= 0.0:
+					b.dying = 0.6
+			_boom(world, 16, Color(0.9, 1.8, 0.5), 100.0)
+			_shockwave(world, 34.0)
+			score_f += 40.0 * combo * TIER_MULT[tier]
+		shake = 8.0
+		pods.clear()
+	else:
+		# base ARC LASH: sweeping tendril fan toward the cursor
+		rmb_cd = 1.6
+		lash = {"t_left": 0.28, "ang": (aim - pos).angle()}
+		var hit_r := 78.0
+		for u in units:
+			var d: Vector2 = (u.pos + Vector2(0, -8)) - pos
+			if d.length() < hit_r and absf(angle_difference(d.angle(), lash.ang)) < 1.1:
+				u.hp = u.get("hp", 1) - 1
+				u.fall = true
+				u.vy = -60.0
+				u.pos.y = minf(u.pos.y, -14.0)
+				_boom(u.pos + Vector2(0, -8), 8, Color(2.0, 0.8, 0.5), 90.0)
+				if u.hp <= 0:
+					u.dead = true
+					_kill_unit(u)
+		for p in people:
+			var d: Vector2 = Vector2(p.pos.x, -4) - pos
+			if d.length() < hit_r and absf(angle_difference(d.angle(), lash.ang)) < 1.1:
+				p.dead = true
+				score_f += 20.0 * combo * TIER_MULT[tier]
+				bio += 2.0
+				_mist(Vector2(p.pos.x, -5))
+		for b in buildings:
+			if b.dead or b.dying > 0.0:
+				continue
+			for k in 3:
+				var probe: Vector2 = pos + Vector2.from_angle(lash.ang + (k - 1) * 0.5) * hit_r * 0.8
+				if probe.x >= b.x and probe.x <= b.x + b.w and probe.y >= -b.cur_h and probe.y <= 0.0:
+					_carve(b, probe, 6.0)
+					b.hp -= 6.0
+					score_f += 8.0 * combo * TIER_MULT[tier]
+					bio += 3.0
+					if b.hp <= 0.0:
+						b.dying = 0.6
+		shake = maxf(shake, 4.0)
+		combo_idle = 0.0
+
+func _shockwave(p: Vector2, r: float) -> void:
+	parts.append({"pos": p, "vel": Vector2.ZERO, "life": 0.2, "col": Color(1.8, 1.4, 0.8), "flash": true, "size": r * 0.5})
+	for u in units:
+		if (u.pos + Vector2(0, -8)).distance_to(p) < r:
+			u.hp = u.get("hp", 1) - 1
+			if u.hp <= 0:
+				u.dead = true
+				_kill_unit(u)
+
 func _chew(b: Dictionary, delta: float) -> void:
-	var maul: bool = evo.ironmaw > 0
+	var maul: bool = branch == "ironmaw"
 	var bite: float = (11.0 + combo * 3.2) * delta * (1.0 + tier * 0.15) * (1.8 if maul else 1.0)
 	b.hp -= bite
 	threat = min(100.0, threat + bite * 0.06)
@@ -409,15 +559,10 @@ func _chew(b: Dictionary, delta: float) -> void:
 		_chunks(aim, 4 if maul else 2)
 		if maul:
 			shake = maxf(shake, 4.0)
-			# shockwave: hurt units near the smash point
-			for u in units:
-				if (u.pos + Vector2(0, -8)).distance_to(aim) < 30.0:
-					u.hp = u.get("hp", 1) - 1
-					_boom(u.pos + Vector2(0, -8), 6, Color(2.2, 1.2, 0.5), 80.0)
-					if u.hp <= 0:
-						u.dead = true
-						_kill_unit(u)
-		if evo.spore > 0 and int(t * 7.7) % 4 == 0:
+			_shockwave(aim, 30.0)
+			if nodes.has("aftershock"):
+				aftershock_q.append({"p": aim, "t_left": 0.28})
+		if branch == "spore" and int(t * 7.7) % 4 == 0:
 			pods.append({"b": b, "p": aim - Vector2(b.x, -b.h), "t_left": 6.0, "tick": 0.5})
 		if int(t * 7.7) % 3 == 0:
 			_pop(aim + Vector2(0, -10), "+%d" % int(bite * 1.6 * combo * TIER_MULT[tier] * 8.0), Color("#ffcf8a"))
@@ -432,11 +577,28 @@ func _chew(b: Dictionary, delta: float) -> void:
 		_pop(Vector2(b.x + b.w * 0.5, -b.h - 14), ("CITADEL FELL  +" if b.cit else "+") + _fmt(gain),
 			Color("#ffd75a") if b.cit else Color("#ffb08a"))
 
-const DRAFT_DEFS := [
-	{"id": "ironmaw", "name": "IRONMAW", "desc": "tendrils grow chitin mauls — heavier, wider smashes; shockwaves crush nearby units"},
-	{"id": "gorehook", "name": "GOREHOOK", "desc": "barbed hooks — reel everything twice as fast; RMB grapples YOU toward the cursor"},
+const BRANCH_DEFS := [
+	{"id": "ironmaw", "name": "IRONMAW", "desc": "chitin mauls — heavier, wider smashes; every smash shockwaves nearby units"},
+	{"id": "gorehook", "name": "GOREHOOK", "desc": "barbed hooks — reel everything 2x faster, grind harder through walls"},
 	{"id": "spore", "name": "SPORE BLOOM", "desc": "plant pods in wounds — they keep gnawing the building on their own"},
 ]
+const NODE_DEFS := {
+	"ironmaw": [
+		{"id": "seismic", "name": "SEISMIC SLAM", "kind": "ACTIVE — RMB", "desc": "slam the street: a shockwave rolls both ways, flipping units and cracking foundations"},
+		{"id": "chitin", "name": "DENSE CHITIN", "kind": "PASSIVE", "desc": "armored mass — incoming fire deals 35% less damage"},
+		{"id": "aftershock", "name": "AFTERSHOCK", "kind": "PASSIVE", "desc": "every maul smash echoes a second, delayed shockwave"},
+	],
+	"gorehook": [
+		{"id": "sling", "name": "SLING", "kind": "ACTIVE — RMB", "desc": "hurl the grabbed unit at the cursor as a wrecking projectile; empty-handed, grapple yourself instead"},
+		{"id": "flenser", "name": "FLENSER", "kind": "PASSIVE", "desc": "dragged and thrown bodies tear through buildings for double damage"},
+		{"id": "sinew", "name": "LONG SINEW", "kind": "PASSIVE", "desc": "tendrils reach 40% farther and hold two victims at once"},
+	],
+	"spore": [
+		{"id": "burst", "name": "BURST BLOOM", "kind": "ACTIVE — RMB", "desc": "detonate every pod at once — big craters, shockwaves, spores everywhere"},
+		{"id": "creep", "name": "CREEP", "kind": "PASSIVE", "desc": "dying pods seed a child pod nearby"},
+		{"id": "cloud", "name": "CARRION CLOUD", "kind": "PASSIVE", "desc": "every kill feeds you — bonus healing and combo"},
+	],
+}
 
 func _open_draft() -> void:
 	draft_open = true
@@ -444,34 +606,49 @@ func _open_draft() -> void:
 	add_child(draft_layer)
 	var dim := ColorRect.new()
 	dim.size = Vector2(640, 360)
-	dim.color = Color(0.02, 0.0, 0.05, 0.75)
+	dim.color = Color(0.02, 0.0, 0.05, 0.78)
 	draft_layer.add_child(dim)
-	var title := _label(draft_layer, Vector2(0, 60), 20, Color("#ff4d78"))
-	title.text = "THE SWARM EVOLVES — choose"
+	var title := _label(draft_layer, Vector2(0, 52), 20, Color("#ff4d78"))
 	title.size = Vector2(640, 30)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	for i in DRAFT_DEFS.size():
-		var d: Dictionary = DRAFT_DEFS[i]
+	var opts: Array
+	if branch == "":
+		title.text = "THE SWARM EVOLVES — choose your line"
+		opts = BRANCH_DEFS
+	else:
+		title.text = branch.to_upper() + " DEEPENS — choose"
+		opts = NODE_DEFS[branch].filter(func(n): return not nodes.has(n.id))
+	for i in opts.size():
+		var d: Dictionary = opts[i]
 		var btn := Button.new()
-		var lvl: int = evo[d.id]
-		btn.text = d.name + ("  [tier %d]" % (lvl + 1))
-		btn.position = Vector2(70, 110 + i * 62)
+		btn.text = d.name + ("   [%s]" % d.kind if d.has("kind") else "")
+		btn.position = Vector2(70, 100 + i * 64)
 		btn.size = Vector2(500, 30)
 		btn.add_theme_font_size_override("font_size", 13)
 		btn.pressed.connect(_pick_draft.bind(d.id))
 		draft_layer.add_child(btn)
-		var desc := _label(draft_layer, Vector2(78, 140 + i * 62), 9, Color("#c8d0e8"))
+		var desc := _label(draft_layer, Vector2(78, 131 + i * 64), 9, Color("#c8d0e8"))
 		desc.text = d.desc
-	get_viewport().set_input_as_handled()
 
 func _pick_draft(id: String) -> void:
-	evo[id] += 1
+	var picked_name := ""
+	if branch == "":
+		branch = id
+		picked_name = BRANCH_DEFS.filter(func(d): return d.id == id)[0].name
+	else:
+		nodes[id] = true
+		picked_name = NODE_DEFS[branch].filter(func(d): return d.id == id)[0].name
+		match id:
+			"chitin": dmg_taken_mult = 0.65
+			"sinew":
+				tendril_range = 140.0
+				max_grabs = 2
 	bio_stage += 1
 	draft_open = false
 	if draft_layer:
 		draft_layer.queue_free()
 		draft_layer = null
-	_pop(pos + Vector2(0, -24), DRAFT_DEFS.filter(func(d): return d.id == id)[0].name, Color(2.0, 0.6, 0.7))
+	_pop(pos + Vector2(0, -24), picked_name, Color(2.0, 0.6, 0.7))
 	radius = minf(24.0, radius + 2.0)  # visible growth per evolution
 
 func _kill_unit(u: Dictionary) -> void:
@@ -483,9 +660,9 @@ func _kill_unit(u: Dictionary) -> void:
 	var gain := int(base * combo * TIER_MULT[tier])
 	score_f += gain
 	bio += 20.0 if u.kind == "tank" else 12.0
-	combo = minf(9.5, combo + 0.3)
+	combo = minf(9.5, combo + (0.6 if nodes.has("cloud") else 0.3))
 	combo_idle = 0.0
-	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0))
+	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0))
 	threat = minf(100.0, threat + 1.5)
 	shake = 10.0
 	_explode(u.pos + Vector2(0, -8), u.kind)
@@ -555,7 +732,7 @@ func _army(delta: float) -> void:
 		s.life -= delta
 		if s.pos.distance_to(pos) < radius:
 			s.life = 0.0
-			hp -= 6.0 if s.heavy else 3.0
+			hp -= (6.0 if s.heavy else 3.0) * dmg_taken_mult
 			combo = max(1.0, combo - 1.0)
 			shake = 6.0
 			hit_flash = 1.0
@@ -630,7 +807,7 @@ func _build_hud() -> void:
 	hud.sub.size = Vector2(640, 20)
 	hud.sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var help := _label(layer, Vector2(10, 344), 8, Color(0.85, 0.9, 1, 0.45))
-	help.text = "WASD — fly.  HOLD LMB — lash tendrils at the cursor: chew buildings, snatch people, reel in vehicles.  R — restart."
+	help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / your evolved skill.  R — restart."
 
 func _label(parent: Node, p: Vector2, sz: int, col: Color) -> Label:
 	var l := Label.new()
@@ -878,6 +1055,19 @@ func _draw_tendrils() -> void:
 	draw_line(aim + Vector2(1.5, 0), aim + Vector2(4, 0), ch_col, 1)
 	draw_line(aim + Vector2(0, -4), aim + Vector2(0, -1.5), ch_col, 1)
 	draw_line(aim + Vector2(0, 1.5), aim + Vector2(0, 4), ch_col, 1)
+	# ARC LASH sweep visual (independent of LMB)
+	if lash.t_left > 0.0:
+		var prog: float = 1.0 - lash.t_left / 0.28
+		var sweep_a: float = lash.ang - 1.1 + prog * 2.2
+		var lp := pos
+		for s3 in range(1, 8):
+			var f2 := float(s3) / 7.0
+			var wob2: float = sin(f2 * 7.0 + t * 30.0) * 4.0 * f2
+			var npt: Vector2 = pos + Vector2.from_angle(sweep_a + wob2 * 0.02) * (78.0 * f2)
+			draw_line(lp, npt, Color(0.4, 0.06, 0.1, 1.0 - prog * 0.5), 3.0 * (1.0 - f2) + 1.2)
+			draw_line(lp, npt, Color(1.6, 0.3, 0.35, 1.0 - prog * 0.4), 1.8 * (1.0 - f2) + 0.8)
+			lp = npt
+		draw_circle(lp, 2.5, Color(2.2, 0.7, 0.5, 1.0 - prog))
 	if not feeding:
 		return
 	# three tendrils lashing from body to aim (or to grabbed units)
@@ -904,15 +1094,18 @@ func _draw_tendrils() -> void:
 			draw_line(prev, pt, Color(0.9, 0.15, 0.2), thick)
 			prev = pt
 		# branch-specific tips
-		if evo.ironmaw > 0:
+		if branch == "ironmaw":
 			draw_circle(prev, 3.6, Color("#2a1420"))
 			draw_circle(prev + Vector2(-1, -1), 2.4, Color("#4a2430"))
 			draw_circle(prev, 1.2, Color(1.8, 0.5, 0.4))
-		elif evo.gorehook > 0:
+		elif branch == "gorehook":
 			var dirv := (prev - pos).normalized()
 			draw_line(prev, prev + dirv.rotated(2.6) * 5.0, Color(1.6, 0.9, 0.8), 1.4)
 			draw_line(prev, prev + dirv.rotated(-2.6) * 5.0, Color(1.6, 0.9, 0.8), 1.4)
 			draw_circle(prev, 1.4, Color(2.0, 0.5, 0.45))
+		elif branch == "spore":
+			draw_circle(prev, 2.2, Color(0.6, 1.4, 0.4))
+			draw_circle(prev, 1.0, Color(1.8, 0.7, 0.5))
 		else:
 			draw_circle(prev, 1.8, Color(2.0, 0.5, 0.45))
 		if chewing and randf() < 0.4:
