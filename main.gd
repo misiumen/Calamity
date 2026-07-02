@@ -174,9 +174,14 @@ func _carve(b: Dictionary, world: Vector2, r_px: float) -> void:
 				continue
 			var d := Vector2(dx, dy).length()
 			if d <= r:
-				img.set_pixel(px, py, Color(0, 0, 0, 0))
+				if img.get_pixel(px, py).a > 0.05:
+					# torn interior, not a see-through hole: dark rooms + beam lines
+					var interior := Color(0.09, 0.045, 0.075) if py % 12 < 10 else Color(0.045, 0.02, 0.04)
+					if (px + py * 3) % 17 == 0:
+						interior = Color(0.14, 0.07, 0.06)
+					img.set_pixel(px, py, interior)
 			elif d <= r + 1.6 and img.get_pixel(px, py).a > 0.05:
-				img.set_pixel(px, py, Color(0.10, 0.02, 0.03, 1.0))
+				img.set_pixel(px, py, Color(0.16, 0.05, 0.05, 1.0))
 	b.tex.update(img)
 
 # ================= update =================
@@ -189,7 +194,7 @@ func _process(delta: float) -> void:
 			get_tree().quit()
 	if not over:
 		_move(delta)
-		_eat(delta)
+		_tendrils(delta)
 		_people(delta)
 		_army(delta)
 		threat = min(100.0, threat + 0.55 * delta)
@@ -243,56 +248,143 @@ func _people(delta: float) -> void:
 		else:
 			p.vx = sin(t * 0.6 + p.o) * 9.0
 		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, WORLD_W - 320)
-		if Vector2(p.pos.x, -3).distance_to(pos) < radius + 4.0:
-			p.dead = true
-			var gain := int(20.0 * combo * TIER_MULT[tier])
-			score_f += gain
-			combo = minf(9.5, combo + 0.12)
-			combo_idle = 0.0
-			hp = minf(100.0, hp + 0.8)
-			threat = minf(100.0, threat + 0.35)
-			_boom(Vector2(p.pos.x, -4), 5, Color("#c02040"), 60.0)
-			if randf() < 0.4:
-				_pop(Vector2(p.pos.x, -14), "+%d" % gain, Color("#ff8a9a"))
 	people = people.filter(func(p): return not p.get("dead", false))
 
-func _eat(delta: float) -> void:
+# --- tendril state ---
+const TENDRIL_RANGE := 100.0
+var aim := Vector2.ZERO          # clamped world aim point
+var aim_clamped := false
+var feeding := false             # LMB held
+var chew_target = null           # building dict or null
+var chewing := false             # actually biting something this frame
+
+func _tendrils(delta: float) -> void:
 	bite_cd -= delta
-	var chewing := false
-	for b in buildings:
-		if b.dead or b.dying > 0.0:
+	var mouse := get_global_mouse_position()
+	var to_m := mouse - pos
+	aim_clamped = to_m.length() > TENDRIL_RANGE
+	aim = pos + to_m.limit_length(TENDRIL_RANGE)
+	feeding = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not over
+	chewing = false
+	chew_target = null
+	if feeding:
+		# 1) grab a unit near the aim point
+		var grabbed_someone := false
+		for u in units:
+			if u.get("grab", false):
+				continue
+			if (u.pos + Vector2(0, -8)).distance_to(aim) < 17.0:
+				u.grab = true
+				combo_idle = 0.0
+				grabbed_someone = true
+				break
+		# 2) snatch a person
+		if not grabbed_someone:
+			for p in people:
+				if Vector2(p.pos.x, -4).distance_to(aim) < 12.0:
+					p.dead = true
+					var gain := int(20.0 * combo * TIER_MULT[tier])
+					score_f += gain
+					combo = minf(9.5, combo + 0.12)
+					combo_idle = 0.0
+					hp = minf(100.0, hp + 0.8)
+					threat = minf(100.0, threat + 0.35)
+					_mist(Vector2(p.pos.x, -5))
+					if randf() < 0.5:
+						_pop(Vector2(p.pos.x, -16), "+%d" % gain, Color("#ff8a9a"))
+					break
+		# 3) chew the building under the aim point
+		for b in buildings:
+			if b.dead or b.dying > 0.0:
+				continue
+			if aim.x >= b.x and aim.x <= b.x + b.w and aim.y >= -b.cur_h and aim.y <= 0.0:
+				chew_target = b
+				chewing = true
+				_chew(b, delta)
+				break
+	# reel grabbed units in
+	for u in units:
+		if not u.get("grab", false):
 			continue
-		var cx: float = b.x + b.w * 0.5
-		if absf(pos.x - cx) < b.w * 0.5 + radius and pos.y > -b.cur_h - radius:
-			chewing = true
-			var bite: float = (7.0 + combo * 2.4) * delta * (1.0 + tier * 0.15)
-			b.hp -= bite
-			threat = min(100.0, threat + bite * 0.06)
-			combo_idle = 0.0
-			score_f += bite * 1.6 * combo * TIER_MULT[tier]
-			if bite_cd <= 0.0:
-				bite_cd = 0.13
-				combo = min(9.5, combo + 0.06)
-				var carve_at := Vector2(clampf(pos.x, b.x + 4, b.x + b.w - 4), clampf(pos.y, -b.cur_h + 4, -6.0))
-				_carve(b, carve_at, randf_range(4.0, 8.0))
-				b.holes.append({"p": carve_at - Vector2(b.x, -b.h), "o": randf() * TAU})
-				_boom(pos + Vector2(randf_range(-8, 8), randf_range(-8, 8)), 3, Color("#7a6a7a"), 70.0)
-				if int(t * 7.7) % 3 == 0:
-					_pop(Vector2(pos.x, pos.y - 14), "+%d" % int(bite * 1.6 * combo * TIER_MULT[tier] * 8.0), Color("#ffcf8a"))
-			if b.hp <= 0.0:
-				b.dying = 0.6
-				var gain := int(b.maxhp * 8.0 * combo * TIER_MULT[tier] * (4.0 if b.cit else 1.0))
-				score_f += gain
-				combo = min(9.5, combo + 0.5)
-				hp = min(100.0, hp + 5.0)
-				shake = 16.0 if b.cit else 8.0
-				_boom(Vector2(cx, -b.cur_h * 0.5), 60 if b.cit else 26, Color("#5a4a58"), 110.0)
-				_pop(Vector2(cx, -b.h - 14), ("CITADEL FELL  +" if b.cit else "+") + _fmt(gain),
-					Color("#ffd75a") if b.cit else Color("#ffb08a"))
+		var reel: float = 60.0 if u.kind == "tank" else 110.0
+		u.pos = u.pos.move_toward(pos, reel * delta)
+		if u.pos.distance_to(pos) < radius + 2.0:
+			u.dead = true
+			_kill_unit(u)
+	units = units.filter(func(u): return not u.get("dead", false))
 	if not chewing:
 		combo_idle += delta
 		if combo_idle > 1.2 and combo > 1.0:
 			combo = max(1.0, combo - 1.6 * delta)
+
+func _chew(b: Dictionary, delta: float) -> void:
+	var bite: float = (7.0 + combo * 2.4) * delta * (1.0 + tier * 0.15)
+	b.hp -= bite
+	threat = min(100.0, threat + bite * 0.06)
+	combo_idle = 0.0
+	score_f += bite * 1.6 * combo * TIER_MULT[tier]
+	if bite_cd <= 0.0:
+		bite_cd = 0.13
+		combo = min(9.5, combo + 0.06)
+		_carve(b, aim, randf_range(4.0, 8.0))
+		_carve(b, aim + Vector2(randf_range(-5, 5), randf_range(-5, 5)), randf_range(2.5, 5.0))
+		b.holes.append({"p": aim - Vector2(b.x, -b.h), "o": randf() * TAU})
+		_boom(aim, 3, Color("#7a6a7a"), 70.0)
+		_chunks(aim, 2)
+		if int(t * 7.7) % 3 == 0:
+			_pop(aim + Vector2(0, -10), "+%d" % int(bite * 1.6 * combo * TIER_MULT[tier] * 8.0), Color("#ffcf8a"))
+	if b.hp <= 0.0:
+		b.dying = 0.6
+		var gain := int(b.maxhp * 8.0 * combo * TIER_MULT[tier] * (4.0 if b.cit else 1.0))
+		score_f += gain
+		combo = min(9.5, combo + 0.5)
+		hp = min(100.0, hp + 5.0)
+		shake = 16.0 if b.cit else 8.0
+		_boom(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.5), 60 if b.cit else 26, Color("#5a4a58"), 110.0)
+		_pop(Vector2(b.x + b.w * 0.5, -b.h - 14), ("CITADEL FELL  +" if b.cit else "+") + _fmt(gain),
+			Color("#ffd75a") if b.cit else Color("#ffb08a"))
+
+func _kill_unit(u: Dictionary) -> void:
+	var base: int
+	match u.kind:
+		"tank": base = 800
+		"heli": base = 600
+		_: base = 300
+	var gain := int(base * combo * TIER_MULT[tier])
+	score_f += gain
+	combo = minf(9.5, combo + 0.3)
+	combo_idle = 0.0
+	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0))
+	threat = minf(100.0, threat + 1.5)
+	shake = 10.0
+	_explode(u.pos + Vector2(0, -8), u.kind)
+	_pop(u.pos + Vector2(0, -20), "+%d" % gain, Color("#ffd75a"))
+
+func _explode(p: Vector2, kind: String) -> void:
+	parts.append({"pos": p, "vel": Vector2.ZERO, "life": 0.22, "col": Color(2.6, 1.8, 0.9), "flash": true, "size": 16.0})
+	for i in 26:
+		var a := randf() * TAU
+		parts.append({"pos": p, "vel": Vector2(cos(a), sin(a)) * randf_range(20, 120) + Vector2(0, -40),
+			"life": randf_range(0.4, 1.0), "col": Color(2.2, randf_range(0.6, 1.2), 0.3) if randf() < 0.7 else Color("#3a3430"),
+			"size": randf_range(2.0, 3.5)})
+	if kind == "tank":
+		for i in 3:
+			parts.append({"pos": p, "vel": Vector2(randf_range(-60, 60), randf_range(-140, -80)),
+				"life": 1.2, "col": Color("#4a4a3a"), "size": 4.0})
+	for i in 8:
+		parts.append({"pos": p, "vel": Vector2(randf_range(-15, 15), randf_range(-50, -20)),
+			"life": randf_range(0.8, 1.6), "col": Color(0.25, 0.22, 0.24, 0.7), "fire": true, "size": 3.0})
+
+func _mist(p: Vector2) -> void:
+	for i in 9:
+		var a := randf() * TAU
+		parts.append({"pos": p, "vel": Vector2(cos(a), sin(a)) * randf_range(10, 50) + Vector2(0, -20),
+			"life": randf_range(0.3, 0.7), "col": Color(1.4, 0.15, 0.25), "size": randf_range(1.5, 2.5)})
+
+func _chunks(p: Vector2, n: int) -> void:
+	for i in n:
+		parts.append({"pos": p, "vel": Vector2(randf_range(-40, 40), randf_range(-60, -10)),
+			"life": randf_range(0.5, 1.1), "col": Color("#4a3a4a"), "size": randf_range(2.5, 4.0)})
 
 func _army(delta: float) -> void:
 	spawn_cd -= delta
@@ -308,6 +400,8 @@ func _army(delta: float) -> void:
 			else:
 				units.append({"kind": "police", "pos": Vector2(x, 0), "cd": randf_range(0.6, 1.2)})
 	for u in units:
+		if u.get("grab", false):
+			continue
 		var dx: float = pos.x - u.pos.x
 		match u.kind:
 			"police": u.pos.x += signf(dx) * 34.0 * delta
@@ -316,8 +410,10 @@ func _army(delta: float) -> void:
 				u.pos.x += signf(dx) * 38.0 * delta
 				u.pos.y += sin(t * 2.0) * 6.0 * delta
 		u.cd -= delta
+		u.mf = maxf(0.0, u.get("mf", 0.0) - delta)
 		if u.cd <= 0.0 and absf(dx) < 420.0:
 			u.cd = maxf(0.5, randf_range(1.1, 2.0) - tier * 0.12)
+			u.mf = 0.07
 			var origin: Vector2 = u.pos + Vector2(0, -18 if u.kind != "heli" else 4)
 			var lead: Vector2 = pos + vel * 0.35
 			var speed: float = 120.0 if u.kind == "police" else 165.0
@@ -400,7 +496,7 @@ func _build_hud() -> void:
 	hud.sub.size = Vector2(640, 20)
 	hud.sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var help := _label(layer, Vector2(10, 344), 8, Color(0.85, 0.9, 1, 0.45))
-	help.text = "WASD / arrows — fly.  devour buildings and the fleeing crowds.  R — restart."
+	help.text = "WASD — fly.  HOLD LMB — lash tendrils at the cursor: chew buildings, snatch people, reel in vehicles.  R — restart."
 
 func _label(parent: Node, p: Vector2, sz: int, col: Color) -> Label:
 	var l := Label.new()
@@ -447,6 +543,7 @@ func _draw() -> void:
 	_draw_street(left, right)
 	_draw_actors()
 	_draw_swarm()
+	_draw_tendrils()
 	for p in pops:
 		var a2: float = clampf(p.life, 0.0, 1.0)
 		draw_string(ThemeDB.fallback_font, p.pos, p.txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
@@ -613,7 +710,53 @@ func _draw_actors() -> void:
 		draw_rect(Rect2(s.pos.x - 1, s.pos.y - 1, 3 if s.heavy else 2, 3 if s.heavy else 2), sc)
 	for p in parts:
 		var a: float = clampf(p.life * 2.5, 0.0, 1.0)
-		draw_rect(Rect2(p.pos.x, p.pos.y, 2, 2), Color(p.col.r, p.col.g, p.col.b, a))
+		if p.get("flash", false):
+			draw_circle(p.pos, p.size * (1.0 + (0.22 - p.life) * 8.0), Color(p.col.r, p.col.g, p.col.b, a * 0.7))
+		else:
+			var sz: float = p.get("size", 2.0)
+			draw_rect(Rect2(p.pos.x, p.pos.y, sz, sz), Color(p.col.r, p.col.g, p.col.b, a))
+	# muzzle flashes
+	for u in units:
+		if u.get("mf", 0.0) > 0.0:
+			draw_circle(u.pos + Vector2(signf(pos.x - u.pos.x) * 12, -22 if u.kind == "tank" else -8),
+				3.0, Color(2.4, 2.0, 1.0, 0.8))
+
+func _draw_tendrils() -> void:
+	# crosshair
+	var ch_col := Color(1.4, 0.5, 0.55, 0.4 if aim_clamped else 0.75)
+	draw_line(aim + Vector2(-4, 0), aim + Vector2(-1.5, 0), ch_col, 1)
+	draw_line(aim + Vector2(1.5, 0), aim + Vector2(4, 0), ch_col, 1)
+	draw_line(aim + Vector2(0, -4), aim + Vector2(0, -1.5), ch_col, 1)
+	draw_line(aim + Vector2(0, 1.5), aim + Vector2(0, 4), ch_col, 1)
+	if not feeding:
+		return
+	# three tendrils lashing from body to aim (or to grabbed units)
+	var targets: Array = []
+	for u in units:
+		if u.get("grab", false):
+			targets.append(u.pos + Vector2(0, -8))
+	if targets.is_empty():
+		for i in 3:
+			var spread := Vector2(sin(t * 13.0 + i * 2.1) * 5.0, cos(t * 11.0 + i * 1.7) * 5.0)
+			targets.append(aim + spread)
+	for i in targets.size():
+		var tip: Vector2 = targets[i]
+		var segs := 9
+		var prev := pos
+		for s2 in range(1, segs + 1):
+			var f := float(s2) / segs
+			var base := pos.lerp(tip, f)
+			var perp := (tip - pos).normalized().orthogonal()
+			var wave: float = sin(f * 9.0 + t * (16.0 + i * 3.0) + i * 2.0) * 6.0 * (1.0 - f) * (0.4 + f)
+			var pt := base + perp * wave
+			var thick: float = 2.5 * (1.0 - f) + 0.8
+			draw_line(prev, pt, Color(0.35, 0.05, 0.1), thick + 1.0)
+			draw_line(prev, pt, Color(0.9, 0.15, 0.2), thick)
+			prev = pt
+		# bright HDR tip
+		draw_circle(prev, 1.8, Color(2.0, 0.5, 0.45))
+		if chewing and randf() < 0.4:
+			draw_circle(prev, 3.2, Color(1.8, 0.6, 0.4, 0.5))
 
 func _draw_swarm() -> void:
 	if pos.y > -120:
