@@ -44,6 +44,10 @@ const END_TEXT := {
 		"lose": "THE STORM IS GROUNDED", "lose_s": "nine throats fall silent."},
 	"tzitzimitl": {"win": "THE SUN SETS FOREVER", "win_s": "the serpent coils around a darkened world.",
 		"lose": "THE SERPENT IS BROKEN", "lose_s": "dawn crawls back over the wreckage."},
+	"drowned": {"win": "THE CITY DROWNS", "win_s": "the water keeps what it takes.",
+		"lose": "THE DEEP RECEDES", "lose_s": "the tide goes out and does not return."},
+	"rider": {"win": "A HARVEST OF SILENCE", "win_s": "everything that lived here walks behind him now.",
+		"lose": "THE RIDER FALLS", "lose_s": "the pale horse wanders on, riderless."},
 }
 
 var pos := Vector2(560, -80)
@@ -96,6 +100,10 @@ func _ready() -> void:
 		for i in 16:
 			segs.append(pos)
 		_bake_serpent()
+	elif character == "drowned":
+		_bake_drowned()
+	elif character == "rider":
+		_bake_rider()
 	_setup_env()
 	_setup_sfx()
 	_slice_facades()
@@ -120,6 +128,16 @@ func _ready() -> void:
 			radius = 22.0
 			for i in 40:
 				motes.append({"a": randf() * TAU, "d": randf_range(0.15, 1.0), "s": randf_range(0.8, 3.0), "o": randf() * TAU})
+		"drowned":
+			cam.zoom = Vector2(0.8, 0.8)
+			radius = 24.0
+			dmg_taken_mult = 0.6
+			pos = Vector2(560, -12)
+		"rider":
+			cam.zoom = Vector2(0.85, 0.85)
+			radius = 18.0
+			dmg_taken_mult = 0.85
+			pos = Vector2(560, -12)
 	swarm_light = PointLight2D.new()
 	swarm_light.texture = _radial_tex(128)
 	swarm_light.color = Color(1.0, 0.25, 0.3)
@@ -211,6 +229,59 @@ func _outline(img: Image, col: Color) -> void:
 					break
 			if edge:
 				img.set_pixel(x, y, col)
+
+func _bake_drowned() -> void:
+	var OUT := Color("#0a0e14")
+	var D1 := Color("#1c3a44")
+	var D2 := Color("#2e5a62")
+	var D3 := Color("#4a8a88")
+	var GL := Color("#b8e8d8")
+	var img := Image.create(36, 32, false, Image.FORMAT_RGBA8)
+	# hunched mass
+	for px in [[8, 6, 22, 20, D2], [10, 4, 16, 6, D2], [6, 12, 6, 12, D1], [26, 10, 6, 14, D1],
+			[12, 6, 14, 5, D3], [10, 24, 18, 4, D1]]:
+		img.fill_rect(Rect2i(px[0], px[1], px[2], px[3]), px[4])
+	# barnacle glints
+	for mp in [[13, 9], [20, 8], [24, 13], [11, 16], [17, 19]]:
+		img.set_pixel(mp[0], mp[1], D3)
+	# tentacle beard
+	for tb in 5:
+		var tx := 11 + tb * 4
+		img.fill_rect(Rect2i(tx, 22, 2, 7 + (tb % 3) * 2), D1)
+		img.set_pixel(tx, 30, D2)
+	# eyes — a row of pale lights
+	for e in [[14, 11], [18, 10], [22, 11], [16, 14], [20, 14]]:
+		img.set_pixel(e[0], e[1], GL)
+	_outline(img, OUT)
+	tex_drowned = ImageTexture.create_from_image(img)
+
+func _bake_rider() -> void:
+	var OUT := Color("#0c0a0a")
+	var BONE := Color("#cfc4a4")
+	var BONE2 := Color("#eae0c4")
+	var SHRD := Color("#3a3430")   # shroud
+	var SHRD2 := Color("#57504a")
+	var img := Image.create(34, 30, false, Image.FORMAT_RGBA8)
+	# gaunt horse: body, neck, skull head, legs
+	img.fill_rect(Rect2i(6, 14, 20, 6), BONE)
+	img.fill_rect(Rect2i(4, 15, 4, 4), BONE)
+	img.fill_rect(Rect2i(24, 10, 4, 6), BONE)   # neck
+	img.fill_rect(Rect2i(26, 8, 7, 4), BONE2)   # skull
+	img.set_pixel(31, 9, OUT)                   # eye socket
+	for leg in [[8, 20], [13, 20], [19, 20], [24, 20]]:
+		img.fill_rect(Rect2i(leg[0], leg[1], 2, 9), BONE)
+	# ribs showing
+	for r in 3:
+		img.fill_rect(Rect2i(10 + r * 4, 15, 1, 4), BONE2)
+	# the rider: hooded shroud + scythe
+	img.fill_rect(Rect2i(12, 4, 8, 11), SHRD)
+	img.fill_rect(Rect2i(13, 2, 6, 4), SHRD2)   # hood
+	img.fill_rect(Rect2i(15, 4, 2, 1), Color(1.8, 1.5, 0.6))  # eye glow
+	img.fill_rect(Rect2i(20, 0, 1, 13), SHRD2)  # scythe haft
+	img.fill_rect(Rect2i(21, 0, 6, 2), BONE2)   # blade
+	img.set_pixel(26, 2, BONE2)
+	_outline(img, OUT)
+	tex_rider = ImageTexture.create_from_image(img)
 
 func _setup_sfx() -> void:
 	for i in 10:
@@ -619,9 +690,17 @@ func _process(delta: float) -> void:
 			"tzitzimitl":
 				_tzitzi_move(delta)
 				_tzitzi(delta)
+			"drowned":
+				_ground_move(delta, 115.0)
+				_drowned(delta)
+			"rider":
+				_ground_move(delta, 95.0)
+				_rider(delta)
 			_:
 				_move(delta)
 				_tendrils(delta)
+		if not allies.is_empty() or not flood.is_empty():
+			_allies_update(delta)
 		lmb_prev = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		_people(delta)
 		_army(delta)
@@ -697,8 +776,37 @@ func _move(delta: float) -> void:
 
 func _people(delta: float) -> void:
 	for p in people:
+		# the plague blossoms
+		if p.has("inf") and t > p.inf:
+			p.dead = true
+			_rise(Vector2(p.pos.x, -4), false)
+			score_f += 20.0 * combo * TIER_MULT[tier]
+			continue
+		# rioters tear at the nearest walls
+		if p.get("riot", false):
+			var rb = null
+			var rd := 1e9
+			for b in buildings:
+				if b.dead or b.dying > 0.0:
+					continue
+				var dbx: float = absf(b.x + b.w * 0.5 - p.pos.x)
+				if dbx < rd:
+					rd = dbx
+					rb = b
+			if rb != null:
+				p.vx = move_toward(p.vx, signf(rb.x + rb.w * 0.5 - p.pos.x) * 30.0, 100.0 * delta)
+				p.pos.x += p.vx * delta
+				if rd < rb.w * 0.5 + 6.0:
+					rb.hp -= 1.6 * delta
+					score_f += 1.2 * delta * combo * TIER_MULT[tier]
+					meter = minf(100.0, meter + 0.5 * delta)
+					if randf() < 0.5 * delta:
+						_boom(Vector2(p.pos.x, -6), 2, Color(1.4, 0.6, 1.2), 40.0)
+					if rb.hp <= 0.0:
+						_collapse(rb)
+			continue
 		var d: float = pos.x - p.pos.x
-		if absf(d) < 90.0 and pos.y > -60.0:
+		if absf(d) < 90.0 and pos.y > -60.0 and not character in ["drowned", "rider"]:
 			p.panic = true
 		if blackout_t > 0.0:
 			p.panic = true   # the sun is gone — everyone runs
@@ -793,6 +901,15 @@ var sfx_bank := {}
 var serp_head: Texture2D
 var serp_body: Texture2D
 var serp_wing: Texture2D
+# --- allies (fishmen, risen) + the two ground gods ---
+var allies: Array = []           # {kind, pos, hp, cd, life}
+var lmb_cd := 0.0
+var rally := Vector2.ZERO
+var has_rally := false
+var flood: Array = []            # water zones {x0, x1, t_left}
+var trail_cd := 0.0
+var tex_drowned: Texture2D
+var tex_rider: Texture2D
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
@@ -1285,6 +1402,232 @@ func _tzitzi(delta: float) -> void:
 		if combo_idle > 1.4 and combo > 1.0:
 			combo = max(1.0, combo - 1.4 * delta)
 
+# ================= DROWNED ONE + PALE RIDER (ground gods) =================
+func _ground_move(delta: float, top_speed: float) -> void:
+	var dir := Input.get_axis("move_left", "move_right")
+	vel.x += dir * 700.0 * delta
+	vel.x = clampf(vel.x * pow(0.03, delta) if dir == 0 else vel.x, -top_speed, top_speed)
+	vel.y += 500.0 * delta
+	if Input.is_action_pressed("move_up") and pos.y >= -14.0:
+		vel.y = -170.0   # heavy lurch upward
+	pos += vel * delta
+	if pos.y > -12.0:
+		pos.y = -12.0
+		vel.y = 0.0
+	pos.x = clamp(pos.x, 40, WORLD_W - 40)
+	aim = get_global_mouse_position()
+	aim_clamped = false
+	feeding = false
+
+func _drowned(delta: float) -> void:
+	lmb_cd -= delta
+	rmb_cd -= delta
+	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	# MADDEN — click a mind and it breaks
+	if lmb and not lmb_prev and lmb_cd <= 0.0:
+		lmb_cd = 1.2 if nodes.has("echoes") else 2.4
+		var hit := false
+		for u in units:
+			if u.get("mad", false) or u.kind in ["carcass", "jet"]:
+				continue
+			if (u.pos + Vector2(0, -8)).distance_to(aim) < 20.0:
+				_madden(u)
+				hit = true
+				break
+		if not hit:
+			for pe in people:
+				if Vector2(pe.pos.x, -4).distance_to(aim) < 22.0:
+					pe.riot = true
+					_pop(Vector2(pe.pos.x, -14), "RIOT", Color(1.4, 0.5, 1.2))
+			_sfx("grab")
+	# THE DEEP ANSWERS — fishmen crawl out
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= 80.0:
+		rmb_cd = 1.5
+		meter -= 80.0
+		_sfx("eclipse")
+		var n_fish: int = 6 if branch == "father" else 4
+		for i in n_fish:
+			var fx: float = clampf(aim.x + randf_range(-30, 30), 60, WORLD_W - 60)
+			var kind := "brute" if (branch == "father" and i % 2 == 0) else "fishman"
+			if nodes.has("priests") and i == 0:
+				kind = "priest"
+			allies.append({"kind": kind, "pos": Vector2(fx, -4), "hp": 6 if kind == "brute" else 3,
+				"cd": 0.0, "life": 30.0})
+			_boom(Vector2(fx, -4), 8, Color(0.3, 0.8, 0.8), 70.0)
+		_pop(aim + Vector2(0, -20), "THE DEEP ANSWERS", Color(0.5, 1.6, 1.5))
+	# BLACK TIDE — floodwater follows your wake
+	if branch == "tide":
+		trail_cd -= delta
+		if trail_cd <= 0.0 and absf(vel.x) > 20.0:
+			trail_cd = 0.4
+			flood.append({"x0": pos.x - 18.0, "x1": pos.x + 18.0, "t_left": 1e9 if nodes.has("depths") else 20.0})
+	# whelp rises in deep flood
+	if nodes.has("whelp") and not allies.any(func(a): return a.kind == "whelp") and not flood.is_empty():
+		var fz: Dictionary = flood[randi() % flood.size()]
+		allies.append({"kind": "whelp", "pos": Vector2((fz.x0 + fz.x1) * 0.5, -4), "hp": 20, "cd": 0.0, "life": 1e9})
+	if nodes.has("tideborn"):
+		if t - float(get_meta("last_tideborn", 0.0)) > 30.0:
+			set_meta("last_tideborn", t)
+			allies.append({"kind": "fishman", "pos": Vector2(pos.x + randf_range(-40, 40), -4), "hp": 3, "cd": 0.0, "life": 30.0})
+
+func _madden(u: Dictionary) -> void:
+	u.mad = true
+	u.mad_t = 12.0 + (8.0 if nodes.has("hollowing") else 0.0)
+	combo = minf(9.5, combo + 0.2)
+	combo_idle = 0.0
+	meter = minf(100.0, meter + 6.0)
+	bio += 4.0
+	score_f += 60.0 * combo * TIER_MULT[tier]
+	_pop(u.pos + Vector2(0, -18), "MADNESS", Color(1.6, 0.5, 1.5))
+	_boom(u.pos + Vector2(0, -10), 6, Color(1.4, 0.5, 1.4), 60.0)
+	_sfx("hit")
+
+func _rider(delta: float) -> void:
+	lmb_cd -= delta
+	rmb_cd -= delta
+	# infection aura — the fog takes them
+	for pe in people:
+		if not pe.has("inf") and Vector2(pe.pos.x, -4).distance_to(pos) < 55.0:
+			pe.inf = t + 4.0
+	for u in units:
+		if u.kind in ["police", "soldier"] and not u.has("inf") and not u.get("mad", false):
+			if (u.pos + Vector2(0, -8)).distance_to(pos) < 42.0:
+				u.inf = t + 8.0
+	# blightlord: painted plague ground
+	if branch == "blight":
+		trail_cd -= delta
+		if trail_cd <= 0.0 and absf(vel.x) > 10.0:
+			trail_cd = 0.5
+			flood.append({"x0": pos.x - (26.0 if nodes.has("miasma") else 16.0),
+				"x1": pos.x + (26.0 if nodes.has("miasma") else 16.0),
+				"t_left": (40.0 if nodes.has("spores") else 20.0), "plague": true})
+	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if lmb and not lmb_prev:
+		rally = aim
+		has_rally = true
+		_pop(aim, "^", Color(1.5, 1.4, 0.8))
+	# REAPING — every infected thing dies and rises NOW
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= 80.0:
+		rmb_cd = 1.5
+		meter -= 80.0
+		_sfx("bell")
+		var reaped := 0
+		for pe in people:
+			if pe.has("inf"):
+				pe.dead = true
+				_rise(Vector2(pe.pos.x, -4), false)
+				reaped += 1
+		for u in units:
+			if u.has("inf"):
+				u.dead = true
+				_kill_unit(u)
+				_rise(u.pos, branch == "crown")
+				reaped += 1
+		units = units.filter(func(u): return not u.get("dead", false))
+		people = people.filter(func(pe): return not pe.get("dead", false))
+		if reaped > 0:
+			shake = 10.0
+			_pop(pos + Vector2(0, -26), "R E A P I N G  ×%d" % reaped, Color(1.8, 1.6, 0.7))
+
+func _rise(p: Vector2, armed: bool) -> void:
+	var cap: int = 16 if branch == "legion" else 8
+	if allies.size() >= cap:
+		return
+	allies.append({"kind": "risen_soldier" if armed else "risen", "pos": Vector2(p.x, -4),
+		"hp": 4 if armed else 2, "cd": 0.0,
+		"life": 1e9 if nodes.has("endless") else 25.0})
+	_mist(p)
+	meter = minf(100.0, meter + 4.0)
+	bio += 3.0
+
+func _allies_update(delta: float) -> void:
+	for a in allies:
+		a.life -= delta
+		a.cd -= delta
+		var speed: float = 90.0 if nodes.has("drill") else 46.0
+		if a.kind == "whelp":
+			speed = 26.0
+		# find prey
+		var prey = null
+		var pd := 320.0
+		for u in units:
+			if u.get("mad", false) or u.kind == "carcass":
+				continue
+			var d: float = (u.pos - a.pos).length()
+			if d < pd:
+				pd = d
+				prey = u
+		var goto: Vector2
+		if prey != null:
+			goto = prey.pos
+		elif has_rally:
+			goto = rally
+		else:
+			goto = pos
+		a.pos.x = move_toward(a.pos.x, goto.x, speed * delta)
+		# flood empowers the deep-born
+		var in_flood := false
+		for fz in flood:
+			if not fz.get("plague", false) and a.pos.x >= fz.x0 and a.pos.x <= fz.x1:
+				in_flood = true
+				break
+		if prey != null and a.cd <= 0.0:
+			match a.kind:
+				"risen_soldier":
+					if pd < 180.0:
+						a.cd = 1.5
+						shells.append({"pos": a.pos + Vector2(0, -8), "vel": (prey.pos + Vector2(0, -8) - a.pos).normalized() * 130.0,
+							"life": 3.0, "heavy": false, "friendly": true})
+				"priest":
+					if pd < 60.0:
+						a.cd = 6.0
+						_madden(prey)
+				_:
+					if pd < 15.0:
+						a.cd = 0.8 if a.kind != "whelp" else 1.6
+						var dmg: int = 1
+						if a.kind == "brute":
+							dmg = 2
+						elif a.kind == "whelp":
+							dmg = 4
+						if in_flood and character == "drowned":
+							dmg += 1
+						prey.hp = prey.get("hp", 1) - dmg
+						_boom(prey.pos + Vector2(0, -8), 5, Color(0.4, 1.0, 0.9) if character == "drowned" else Color(0.7, 0.75, 0.6), 60.0)
+						if prey.hp <= 0:
+							prey.dead = true
+							_kill_unit(prey)
+		# risen martyrs detonate
+		if a.life <= 0.0 and nodes.has("martyrs") and a.kind in ["risen", "risen_soldier"]:
+			_shockwave(a.pos + Vector2(0, -6), 26.0)
+			_mist(a.pos)
+	allies = allies.filter(func(a): return a.life > 0.0 and a.hp > 0)
+	units = units.filter(func(u): return not u.get("dead", false))
+	# flood zones act
+	for fz in flood:
+		fz.t_left -= delta
+		for u in units:
+			if u.pos.x >= fz.x0 and u.pos.x <= fz.x1 and u.kind in ["police", "soldier", "tank", "arty"]:
+				u.slow = 0.5
+				if fz.get("plague", false) and not u.has("inf") and u.kind in ["police", "soldier"]:
+					u.inf = t + 6.0
+				elif nodes.has("leviathan") and randf() < 0.06 * delta * 60.0 * 0.02:
+					u.dead = true
+					_kill_unit(u)
+					_boom(u.pos, 10, Color(0.3, 0.9, 0.9), 80.0)
+		for pe in people:
+			if pe.pos.x >= fz.x0 and pe.pos.x <= fz.x1:
+				if fz.get("plague", false):
+					if not pe.has("inf"):
+						pe.inf = t + 3.0
+				elif randf() < 0.5 * delta:
+					pe.dead = true
+					score_f += 15.0 * combo * TIER_MULT[tier]
+					meter = minf(100.0, meter + 1.5)
+					_mist(Vector2(pe.pos.x, -4))
+	flood = flood.filter(func(fz): return fz.t_left > 0.0)
+	people = people.filter(func(pe): return not pe.get("dead", false))
+
 func _unit_crash_buildings(u: Dictionary, dmg: float) -> bool:
 	var upos: Vector2 = u.pos + Vector2(0, -8)
 	for b in buildings:
@@ -1561,6 +1904,16 @@ const BRANCH_DEFS := {
 		{"id": "obsidian", "name": "OBSIDIAN FANGS", "desc": "wider lance wounds; each building pierced in one dive hits +15% harder"},
 		{"id": "feather", "name": "FEATHER STORM", "desc": "every dive molts razor feathers that drift down and cut what they touch"},
 	],
+	"drowned": [
+		{"id": "choir", "name": "ABYSSAL CHOIR", "desc": "madness is contagious — when the maddened burn out, it leaps to whoever stands closest"},
+		{"id": "tide", "name": "BLACK TIDE", "desc": "floodwater rises in your wake — slows the army, drowns the crowds, feeds your spawn"},
+		{"id": "father", "name": "FATHER OF THE DEEP", "desc": "the deep answers with brutes — bigger squads, twice the muscle"},
+	],
+	"rider": [
+		{"id": "legion", "name": "LEGION", "desc": "the horde doubles — sixteen dead walk behind you"},
+		{"id": "blight", "name": "BLIGHTLORD", "desc": "your passage paints plague ground that infects all who stand on it"},
+		{"id": "crown", "name": "CARRION CROWN", "desc": "fallen soldiers rise still holding their guns — your dead shoot back"},
+	],
 }
 const NODE_DEFS := {
 	"ironmaw": [
@@ -1607,6 +1960,36 @@ const NODE_DEFS := {
 		{"id": "molt", "name": "HEAVY MOLT", "kind": "PASSIVE", "desc": "six feathers per dive instead of three"},
 		{"id": "rain", "name": "FEATHER RAIN", "kind": "PASSIVE", "desc": "during eclipse, blades rain across the whole sky"},
 		{"id": "keen", "name": "KEEN EDGE", "kind": "PASSIVE", "desc": "feathers also gouge the buildings they brush"},
+	],
+	"choir": [
+		{"id": "echoes", "name": "ECHOES", "kind": "PASSIVE", "desc": "madden twice as often"},
+		{"id": "hollowing", "name": "HOLLOWING", "kind": "PASSIVE", "desc": "the maddened last 8 seconds longer before burning out"},
+		{"id": "dirge", "name": "DIRGE", "kind": "PASSIVE", "desc": "your presence alone frays their aim"},
+	],
+	"tide": [
+		{"id": "depths", "name": "THE DEPTHS", "kind": "PASSIVE", "desc": "floodwater never drains"},
+		{"id": "leviathan", "name": "LEVIATHAN", "kind": "PASSIVE", "desc": "things in the flood get pulled under"},
+		{"id": "tideborn", "name": "TIDEBORN", "kind": "PASSIVE", "desc": "a fishman crawls ashore every 30 seconds, free"},
+	],
+	"father": [
+		{"id": "priests", "name": "DEEP PRIESTS", "kind": "PASSIVE", "desc": "each calling brings a priest who maddens the enemy"},
+		{"id": "whelp", "name": "LEVIATHAN WHELP", "kind": "PASSIVE", "desc": "something enormous rises in your floodwater"},
+		{"id": "tideborn", "name": "TIDEBORN", "kind": "PASSIVE", "desc": "a fishman crawls ashore every 30 seconds, free"},
+	],
+	"legion": [
+		{"id": "martyrs", "name": "MARTYRS", "kind": "PASSIVE", "desc": "risen burst on death"},
+		{"id": "drill", "name": "DEATH MARCH", "kind": "PASSIVE", "desc": "the horde moves twice as fast"},
+		{"id": "endless", "name": "ENDLESS", "kind": "PASSIVE", "desc": "the risen never crumble on their own"},
+	],
+	"blight": [
+		{"id": "miasma", "name": "MIASMA", "kind": "PASSIVE", "desc": "plague ground spreads wider"},
+		{"id": "spores", "name": "SPORE WIND", "kind": "PASSIVE", "desc": "plague ground lasts twice as long"},
+		{"id": "endless", "name": "ENDLESS", "kind": "PASSIVE", "desc": "the risen never crumble on their own"},
+	],
+	"crown": [
+		{"id": "martyrs", "name": "MARTYRS", "kind": "PASSIVE", "desc": "risen burst on death"},
+		{"id": "drill", "name": "DEATH MARCH", "kind": "PASSIVE", "desc": "the horde moves twice as fast"},
+		{"id": "endless", "name": "ENDLESS", "kind": "PASSIVE", "desc": "the risen never crumble on their own"},
 	],
 }
 
@@ -1746,11 +2129,51 @@ func _army(delta: float) -> void:
 			continue
 		if stun_t > 0.0 and u.kind != "jet":
 			continue
+		# plague takes its due
+		if u.has("inf") and t > u.inf:
+			u.dead = true
+			_kill_unit(u)
+			_rise(u.pos, branch == "crown")
+			continue
+		# the maddened turn on their own
+		if u.get("mad", false):
+			u.mad_t -= delta
+			if u.mad_t <= 0.0:
+				u.dead = true
+				_boom(u.pos + Vector2(0, -8), 8, Color(1.4, 0.5, 1.4), 70.0)
+				if branch == "choir":
+					for u2 in units:
+						if u2 != u and not u2.get("mad", false) and not u2.get("dead", false) \
+								and (u2.pos - u.pos).length() < 60.0 and not u2.kind in ["carcass", "jet"]:
+							_madden(u2)
+							break
+				continue
+			var prey = null
+			var pd := 300.0
+			for u2 in units:
+				if u2 == u or u2.get("mad", false) or u2.get("dead", false) or u2.kind == "carcass":
+					continue
+				var d2m: float = (u2.pos - u.pos).length()
+				if d2m < pd:
+					pd = d2m
+					prey = u2
+			if prey != null:
+				u.pos.x += signf(prey.pos.x - u.pos.x) * 30.0 * delta
+				u.cd -= delta
+				if u.cd <= 0.0 and pd < 260.0:
+					u.cd = 1.0
+					u.mf = 0.07
+					shells.append({"pos": u.pos + Vector2(0, -12),
+						"vel": (prey.pos + Vector2(0, -8) - u.pos).normalized() * 140.0,
+						"life": 3.0, "heavy": u.kind == "tank", "friendly": true})
+			continue
 		var dx: float = pos.x - u.pos.x
+		var slow: float = u.get("slow", 1.0)
+		u.slow = 1.0
 		match u.kind:
-			"police": u.pos.x += signf(dx) * 34.0 * delta
-			"soldier": u.pos.x += signf(dx) * 24.0 * delta
-			"tank": u.pos.x += signf(dx) * 17.0 * delta
+			"police": u.pos.x += signf(dx) * 34.0 * delta * slow
+			"soldier": u.pos.x += signf(dx) * 24.0 * delta * slow
+			"tank": u.pos.x += signf(dx) * 17.0 * delta * slow
 			"arty":
 				# artillery keeps its distance
 				if absf(dx) < 260.0:
@@ -1773,7 +2196,17 @@ func _army(delta: float) -> void:
 			u.cd = maxf(0.4, (randf_range(1.1, 2.0) - tier * 0.12) / defense)
 			u.mf = 0.07
 			var origin: Vector2 = u.pos + Vector2(0, -18 if u.kind != "heli" else 4)
-			var lead: Vector2 = pos + vel * 0.35
+			# aim at the nearest threat — the god or its spawn
+			var tgt := pos
+			var tvel := vel
+			var tdist: float = (pos - u.pos).length()
+			for a in allies:
+				var da: float = (a.pos - u.pos).length()
+				if da < tdist:
+					tdist = da
+					tgt = a.pos + Vector2(0, -6)
+					tvel = Vector2.ZERO
+			var lead: Vector2 = tgt + tvel * 0.35
 			if u.kind == "arty":
 				# ballistic lob
 				var fl := (lead - origin)
@@ -1787,6 +2220,8 @@ func _army(delta: float) -> void:
 					dirv = dirv.rotated(randf_range(-0.55, 0.55))  # blind in the dark
 				elif sun_eaten or dark_perm > 0.0:
 					dirv = dirv.rotated(randf_range(-0.3, 0.3))
+				if nodes.has("dirge") and (u.pos - pos).length() < 220.0:
+					dirv = dirv.rotated(randf_range(-0.28, 0.28))  # the choir frays their nerve
 				shells.append({"pos": origin, "vel": dirv * speed, "life": 4.0,
 					"heavy": not (u.kind in ["police", "soldier"])})
 	units = units.filter(func(u): return not u.get("dead", false))
@@ -1809,6 +2244,31 @@ func _army(delta: float) -> void:
 				if absf(pe.pos.x - s.pos.x) < 20.0:
 					pe.dead = true
 					_mist(Vector2(pe.pos.x, -5))
+			continue
+		if s.get("friendly", false):
+			# turned guns hit the army, never the god
+			for u in units:
+				if u.get("mad", false) or u.get("dead", false) or u.kind == "carcass":
+					continue
+				if s.pos.distance_to(u.pos + Vector2(0, -8)) < 9.0:
+					s.life = 0.0
+					u.hp = u.get("hp", 1) - (2 if s.heavy else 1)
+					_boom(s.pos, 5, Color("#ffd75a"), 70.0)
+					if u.hp <= 0:
+						u.dead = true
+						_kill_unit(u)
+					break
+			continue
+		# enemy fire can cut down your spawn
+		var hit_ally := false
+		for a in allies:
+			if s.pos.distance_to(a.pos + Vector2(0, -6)) < 7.0:
+				s.life = 0.0
+				a.hp -= 2 if s.heavy else 1
+				_boom(s.pos, 4, Color("#ffd75a"), 60.0)
+				hit_ally = true
+				break
+		if hit_ally:
 			continue
 		if s.pos.distance_to(pos) < radius:
 			s.life = 0.0
@@ -1899,6 +2359,10 @@ func _build_hud() -> void:
 			help.text = "WASD — fly.  LMB — lightning strike at cursor (3 banked).  RMB — TEMPEST at full storm.  ESC — menu."
 		"tzitzimitl":
 			help.text = "serpent follows your cursor.  LMB — lance dive (pierces buildings).  RMB — DEVOUR THE SUN at full hunger.  ESC — menu."
+		"drowned":
+			help.text = "A/D — wade, W — lurch.  LMB — madden a mind (units turn, crowds riot).  RMB — call the fishmen.  ESC — menu."
+		"rider":
+			help.text = "A/D — ride, W — rear.  your fog infects all near.  LMB — rally the dead.  RMB — REAPING.  ESC — menu."
 		_:
 			help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / evolved skill.  R — restart.  ESC — menu."
 
@@ -1947,6 +2411,12 @@ func _hud_update() -> void:
 			else:
 				hud.biolbl.text = "SUN-HUNGER — RMB devours the sun" if meter < eclipse_cost else "RMB — DEVOUR THE SUN"
 				hud.bio.size.x = 152.0 * clampf(meter / eclipse_cost, 0.0, 1.0)
+		"drowned":
+			hud.biolbl.text = "THE DEEP — RMB calls fishmen at full" if meter < 80.0 else "THE DEEP ANSWERS — RMB"
+			hud.bio.size.x = 152.0 * clampf(meter / 80.0, 0.0, 1.0)
+		"rider":
+			hud.biolbl.text = "HARVEST — RMB reaps all infected at full" if meter < 80.0 else "REAPING READY — RMB"
+			hud.bio.size.x = 152.0 * clampf(meter / 80.0, 0.0, 1.0)
 		_:
 			if bio_stage >= BIO_THRESH.size():
 				hud.bio.size.x = 152.0
@@ -1969,6 +2439,21 @@ func _draw() -> void:
 		if b.x + b.w < left or b.x > right:
 			continue
 		_draw_building(b)
+	# floodwater / plague ground
+	for fz in flood:
+		if fz.x1 < left or fz.x0 > right:
+			continue
+		if fz.get("plague", false):
+			draw_rect(Rect2(fz.x0, -3, fz.x1 - fz.x0, 5), Color(0.5, 0.7, 0.2, 0.28))
+			if randf() < 0.1:
+				parts.append({"pos": Vector2(randf_range(fz.x0, fz.x1), -3), "vel": Vector2(0, -8),
+					"life": 0.8, "col": Color(0.7, 1.0, 0.3, 0.5), "size": 1.5, "fire": true, "smoke": true})
+		else:
+			draw_rect(Rect2(fz.x0, -6, fz.x1 - fz.x0, 8), Color(0.15, 0.5, 0.6, 0.5))
+			var wx2: float = fz.x0
+			while wx2 < fz.x1:
+				draw_rect(Rect2(wx2, -7 + sin(t * 3.0 + wx2 * 0.2) * 1.5, 6, 1.5), Color(0.4, 0.9, 0.95, 0.5))
+				wx2 += 9.0
 	_draw_street(left, right)
 	# eclipse gloom sits UNDER the living things — fires, beasts and armies stay vivid
 	var dark_a: float = maxf(clampf(blackout_t / 1.5, 0.0, 1.0) * 0.5, (0.3 if sun_eaten else 0.0))
@@ -1979,11 +2464,16 @@ func _draw() -> void:
 			draw_circle(moon2, city_def.moon_r + 4.0, Color(0.02, 0.0, 0.03))
 			draw_circle(moon2, city_def.moon_r + 6.0, Color(1.8, 0.9, 0.3, 0.35))
 	_draw_actors()
+	_draw_allies()
 	match character:
 		"keraunos":
 			_draw_keraunos()
 		"tzitzimitl":
 			_draw_tzitzi()
+		"drowned":
+			_draw_drowned()
+		"rider":
+			_draw_rider()
 		_:
 			_draw_swarm()
 			_draw_tendrils()
@@ -2266,6 +2756,11 @@ func _draw_actors() -> void:
 	for u in units:
 		var p: Vector2 = u.pos
 		draw_rect(Rect2(p.x - 9, -1, 18, 2), Color(0, 0, 0, 0.4))
+		if u.get("mad", false):
+			var sw := sin(t * 7.0) * 3.0
+			draw_arc(p + Vector2(0, -22), 3.0 + sw * 0.4, t * 4.0, t * 4.0 + 4.0, 8, Color(1.5, 0.5, 1.6, 0.8), 1.0)
+		elif u.has("inf"):
+			draw_circle(p + Vector2(0, -20 + sin(t * 5.0)), 1.5, Color(0.8, 1.4, 0.3, 0.8))
 		match u.kind:
 			"police":
 				draw_rect(Rect2(p.x - 8, p.y - 7, 16, 5), Color("#aab4c4"))
@@ -2637,6 +3132,81 @@ func _draw_tzitzi() -> void:
 		for i in 5:
 			var tp := hd - dive_dir * (i * 10.0 + 8.0) + Vector2(randf_range(-4, 4), randf_range(-4, 4))
 			draw_line(tp, tp - dive_dir * 8.0, Color(1.8, 1.2, 0.4, 0.55 - i * 0.1), 2.0)
+
+func _draw_allies() -> void:
+	for a in allies:
+		var p: Vector2 = a.pos
+		draw_rect(Rect2(p.x - 4, -1, 8, 2), Color(0, 0, 0, 0.35))
+		match a.kind:
+			"fishman":
+				draw_rect(Rect2(p.x - 2, p.y - 9, 4, 7), Color("#2e7a72"))
+				draw_rect(Rect2(p.x - 2, p.y - 12, 4, 3), Color("#3a968a"))
+				draw_rect(Rect2(p.x - 1, p.y - 11, 1, 1), Color(0.8, 1.6, 1.4))
+				draw_line(p + Vector2(-2, -6), p + Vector2(-4, -3), Color("#255f5a"), 1)
+				draw_line(p + Vector2(2, -6), p + Vector2(4, -3), Color("#255f5a"), 1)
+			"brute":
+				draw_rect(Rect2(p.x - 4, p.y - 12, 8, 10), Color("#2e6a72"))
+				draw_rect(Rect2(p.x - 3, p.y - 15, 6, 4), Color("#3a8a8a"))
+				draw_rect(Rect2(p.x - 2, p.y - 14, 2, 1), Color(0.8, 1.6, 1.4))
+				draw_rect(Rect2(p.x - 6, p.y - 10, 2, 6), Color("#255f66"))
+				draw_rect(Rect2(p.x + 4, p.y - 10, 2, 6), Color("#255f66"))
+			"priest":
+				draw_rect(Rect2(p.x - 3, p.y - 12, 6, 10), Color("#3a4a7a"))
+				draw_rect(Rect2(p.x - 2, p.y - 14, 4, 3), Color("#2e3a62"))
+				draw_circle(p + Vector2(0, -16), 2.5 + sin(t * 4.0) * 0.6, Color(1.2, 0.5, 1.6, 0.4))
+			"whelp":
+				draw_circle(p + Vector2(0, -6), 9.0, Color("#1e4a52"))
+				draw_circle(p + Vector2(-2, -8), 6.0, Color("#2e6a6e"))
+				for tb in 4:
+					var tx2: float = p.x - 7 + tb * 4.5
+					draw_line(Vector2(tx2, p.y - 2), Vector2(tx2 + sin(t * 5.0 + tb) * 3.0, p.y + 1), Color("#1e4a52"), 2)
+				draw_circle(p + Vector2(1, -9), 1.2, Color(0.8, 1.6, 1.4))
+			_:
+				# risen shambler / soldier
+				var rc := Color("#5a6456") if a.kind == "risen_soldier" else Color("#6a6a62")
+				draw_rect(Rect2(p.x - 2, p.y - 8, 4, 6), rc)
+				draw_rect(Rect2(p.x - 2, p.y - 10.5, 4, 3), Color("#8a887a"))
+				draw_rect(Rect2(p.x - 1, p.y - 10, 1, 1), Color(1.5, 1.3, 0.5))
+				if a.kind == "risen_soldier":
+					draw_line(p + Vector2(0, -6), p + Vector2(5, -7), Color("#20261c"), 1)
+
+func _draw_drowned() -> void:
+	draw_circle(aim, 2.0, Color(0.6, 1.6, 1.5, 0.7))
+	draw_arc(aim, 5.0, 0, TAU, 12, Color(0.6, 1.6, 1.5, 0.4), 1.0)
+	var facing: float = signf(aim.x - pos.x)
+	if facing == 0.0:
+		facing = 1.0
+	# dripping aura
+	draw_circle(pos + Vector2(0, -12), 24.0, Color(0.2, 0.6, 0.7, 0.07))
+	if randf() < 0.15:
+		parts.append({"pos": pos + Vector2(randf_range(-14, 14), randf_range(-24, -4)), "vel": Vector2(0, 30),
+			"life": 0.5, "col": Color(0.4, 0.8, 0.9, 0.6), "size": 1.2})
+	draw_set_transform(pos + Vector2(0, 2), 0.0, Vector2(1.4 * facing, 1.4))
+	draw_texture(tex_drowned, Vector2(-18, -30), Color(1, 1, 1))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# bob glow of the eye-lights
+	draw_circle(pos + Vector2(facing * 2.0, -16 + sin(t * 2.0) * 1.5), 6.0, Color(0.5, 1.2, 1.1, 0.10))
+
+func _draw_rider() -> void:
+	draw_circle(aim, 2.0, Color(1.6, 1.5, 0.7, 0.7))
+	draw_arc(aim, 5.0, 0, TAU, 12, Color(1.6, 1.5, 0.7, 0.4), 1.0)
+	if has_rally:
+		draw_line(rally + Vector2(0, -8), rally, Color(1.6, 1.5, 0.7, 0.5), 1.0)
+		draw_circle(rally + Vector2(0, -10), 2.0, Color(1.8, 1.6, 0.7, 0.4 + sin(t * 5.0) * 0.2))
+	var facing: float = signf(aim.x - pos.x)
+	if facing == 0.0:
+		facing = 1.0
+	# plague fog rolls with him
+	for i in 3:
+		var fo := Vector2(sin(t * 0.8 + i * 2.0) * 18.0, -4.0 - i * 3.0)
+		draw_circle(pos + fo, 16.0 + i * 5.0, Color(0.45, 0.55, 0.25, 0.05))
+	if randf() < 0.2:
+		parts.append({"pos": pos + Vector2(randf_range(-30, 30), randf_range(-8, -2)), "vel": Vector2(randf_range(-4, 4), -6),
+			"life": 1.4, "col": Color(0.55, 0.7, 0.3, 0.4), "size": 2.5, "fire": true, "smoke": true})
+	var gait: float = absf(sin(t * 6.0)) * 1.5 if absf(vel.x) > 10.0 else 0.0
+	draw_set_transform(pos + Vector2(0, -gait), 0.0, Vector2(1.3 * facing, 1.3))
+	draw_texture(tex_rider, Vector2(-17, -28), Color(1, 1, 1))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func _draw_swarm() -> void:
 	if pos.y > -120:

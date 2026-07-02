@@ -7,6 +7,10 @@ const ROSTER := [
 		"col": Color("#5ad0ff")},
 	{"id": "tzitzimitl", "name": "TZITZIMITL", "sub": "eclipse serpent — lance dives, blot out the sun",
 		"col": Color("#ffb03a")},
+	{"id": "drowned", "name": "THE DROWNED ONE", "sub": "leviathan puppeteer — madden minds, flood streets, call fishmen",
+		"col": Color("#4ac8be")},
+	{"id": "rider", "name": "THE PALE RIDER", "sub": "pestilence — your fog infects, the dead rise and march for you",
+		"col": Color("#cfc48a")},
 ]
 const CITIES := [
 	{"id": "kowloon", "name": "NEW KOWLOON", "sub": "neon megacity — the baseline hunt"},
@@ -57,17 +61,17 @@ func _rows(defs: Array, on_pick: Callable) -> void:
 		var d: Dictionary = defs[i]
 		var btn := Button.new()
 		btn.text = d.name
-		btn.position = Vector2(190, 132 + i * 58)
-		btn.size = Vector2(260, 28)
-		btn.add_theme_font_size_override("font_size", 14)
+		btn.position = Vector2(190, 116 + i * 46)
+		btn.size = Vector2(260, 26)
+		btn.add_theme_font_size_override("font_size", 13)
 		if d.has("col"):
 			btn.add_theme_color_override("font_color", d.col)
 		btn.pressed.connect(func(): on_pick.call(d.id))
 		add_child(btn)
 		var l := Label.new()
 		l.text = d.sub
-		l.position = Vector2(0, 161 + i * 58)
-		l.size = Vector2(640, 16)
+		l.position = Vector2(0, 143 + i * 46)
+		l.size = Vector2(640, 14)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.add_theme_font_size_override("font_size", 8)
 		l.add_theme_color_override("font_color", Color("#8890b0"))
