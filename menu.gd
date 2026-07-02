@@ -16,6 +16,8 @@ const CITIES := [
 	{"id": "kowloon", "name": "NEW KOWLOON", "sub": "neon megacity — the baseline hunt"},
 	{"id": "thornspire", "name": "THORNSPIRE", "sub": "cold gothic spires — taller, denser, hardened garrison"},
 	{"id": "ashport", "name": "ASHPORT", "sub": "rusting industrial sprawl — soft walls, endless reinforcements"},
+	{"id": "teotl", "name": "TEOTL RUINS", "sub": "jungle temple city — ziggurats, torchlight, old gods' ground"},
+	{"id": "maren", "name": "PORT MAREN", "sub": "half-drowned harbor — warehouses, containers, standing water"},
 ]
 
 var picked_char := ""

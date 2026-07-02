@@ -27,6 +27,24 @@ const CITY_DEFS := {
 		"house_art": ["res://art/cities/thornspire/house-a.png", "res://art/cities/thornspire/house-b.png", "res://art/cities/thornspire/house-c.png"],
 		"far_tex": "res://art/cities/thornspire/background.png", "mid_tex": "res://art/cities/thornspire/middleground.png",
 		"far_scale": 0.8, "mid_scale": 0.85},
+	"teotl": {"name": "TEOTL RUINS", "tint": Color(0.9, 1.05, 0.85), "defense": 0.9,
+		"sky": [Color("#04100c"), Color("#0a241a"), Color("#124532"), Color("#1e6a42"), Color("#37945a")],
+		"big_chance": 0.2, "gap_min": 26.0, "gap_max": 80.0, "spawn_mult": 0.9,
+		"moon": Color(1.2, 1.8, 1.3), "moon_r": 17.0, "lamp": Color(2.0, 1.2, 0.4),
+		"aurora": false, "smog": false, "street": Color("#2a3828"),
+		"mix": {"ziggurat": 0.26, "shrine": 0.34, "house": 0.4},
+		"facade_sheet": "res://art/near-buildings-bg.png", "house_art": [],
+		"far_tex": "res://art/cities/teotl/back.png", "mid_tex": "res://art/cities/teotl/middle.png",
+		"far_scale": 0.55, "mid_scale": 0.6, "cit_kind": "ziggurat"},
+	"maren": {"name": "PORT MAREN", "tint": Color(0.85, 0.95, 1.1), "defense": 1.1,
+		"sky": [Color("#0a0e16"), Color("#131c2c"), Color("#22344a"), Color("#3a566a"), Color("#587a8a")],
+		"big_chance": 0.2, "gap_min": 18.0, "gap_max": 60.0, "spawn_mult": 1.2,
+		"moon": Color(1.5, 1.6, 1.7), "moon_r": 26.0, "lamp": Color(1.4, 1.7, 1.9),
+		"aurora": false, "smog": false, "street": Color("#2c3844"),
+		"mix": {"warehouse": 0.32, "containers": 0.26, "shop": 0.22, "house": 0.2},
+		"facade_sheet": "res://art/near-buildings-bg.png", "house_art": [],
+		"far_tex": "res://art/cities/maren/far-grounds.png", "mid_tex": "res://art/cities/maren/sea.png",
+		"far_scale": 0.8, "mid_scale": 0.9, "cit_kind": "warehouse"},
 	"ashport": {"name": "ASHPORT", "tint": Color(1.18, 0.82, 0.5), "defense": 0.75,
 		"sky": [Color("#0f0a06"), Color("#241408"), Color("#42250c"), Color("#663a10"), Color("#8a5416")],
 		"big_chance": 0.10, "gap_min": 24.0, "gap_max": 70.0, "spawn_mult": 1.7,
@@ -406,12 +424,23 @@ func _slice_facades() -> void:
 		house_imgs.append(hi)
 
 # ---------- procedural low-rise generator (pack-palette pixel art) ----------
-const PAL_WALL := [Color("#241726"), Color("#2c1a22"), Color("#1e1c2e"), Color("#2a2030")]
-const PAL_LIT := [Color("#ffd075"), Color("#ff9bc4"), Color("#7de0e6"), Color("#ffb03a")]
+const CITY_PAL := {
+	"kowloon": {"wall": [Color("#241726"), Color("#2c1a22"), Color("#1e1c2e"), Color("#2a2030")],
+		"lit": [Color("#ffd075"), Color("#ff9bc4"), Color("#7de0e6"), Color("#ffb03a")]},
+	"thornspire": {"wall": [Color("#282436"), Color("#302a3e"), Color("#232030")],
+		"lit": [Color("#a8c4ff"), Color("#ffd075"), Color("#c4a8ff")]},
+	"ashport": {"wall": [Color("#38281c"), Color("#402e1e"), Color("#2e2418")],
+		"lit": [Color("#ffb03a"), Color("#ff8a3a"), Color("#ffd075")]},
+	"teotl": {"wall": [Color("#4a4638"), Color("#565040"), Color("#3e3a30")],
+		"lit": [Color("#ffb03a"), Color("#ff8a3a")]},
+	"maren": {"wall": [Color("#2e3a42"), Color("#38424e"), Color("#263038")],
+		"lit": [Color("#9adce8"), Color("#ffd075"), Color("#7db8d0")]},
+}
 
 func _gen_lowrise(kind: String) -> Image:
-	var wall: Color = PAL_WALL[randi() % PAL_WALL.size()]
-	var lit: Color = PAL_LIT[randi() % PAL_LIT.size()]
+	var pal: Dictionary = CITY_PAL.get(Global.city, CITY_PAL["kowloon"])
+	var wall: Color = pal.wall[randi() % pal.wall.size()]
+	var lit: Color = pal.lit[randi() % pal.lit.size()]
 	var dark := wall.darkened(0.4)
 	var roof := wall.darkened(0.55)
 	var w: int
@@ -429,6 +458,18 @@ func _gen_lowrise(kind: String) -> Image:
 		"school":
 			w = randi_range(70, 92)
 			h = randi_range(34, 42)
+		"ziggurat":
+			w = randi_range(64, 92)
+			h = randi_range(52, 72)
+		"shrine":
+			w = randi_range(26, 38)
+			h = randi_range(26, 36)
+		"warehouse":
+			w = randi_range(62, 92)
+			h = randi_range(30, 42)
+		"containers":
+			w = randi_range(42, 64)
+			h = randi_range(22, 34)
 		_:  # mall
 			w = randi_range(80, 110)
 			h = randi_range(38, 50)
@@ -501,6 +542,67 @@ func _gen_lowrise(kind: String) -> Image:
 			img.fill_rect(Rect2i(dx2 + 6, h - 12, 4, 11), Color("#10141c"))
 			img.fill_rect(Rect2i(2, 0, 2, 14), dark)              # flag pole
 			img.fill_rect(Rect2i(4, 1, 6, 4), Color(0.8, 0.3, 0.3))
+		"ziggurat":
+			# stepped pyramid — five stone terraces and a crowning shrine
+			var steps := 5
+			for s2 in steps:
+				var sw2: int = w - int(float(w) * 0.75 * s2 / steps)
+				var sx2: int = (w - sw2) / 2
+				var sy2: int = h - (s2 + 1) * (h / steps)
+				img.fill_rect(Rect2i(sx2, sy2, sw2, h / steps + 1), wall if s2 % 2 == 0 else wall.darkened(0.12))
+				img.fill_rect(Rect2i(sx2, sy2, sw2, 2), wall.lightened(0.15))
+			# the great stair
+			img.fill_rect(Rect2i(w / 2 - 4, h / steps, 8, h - h / steps), wall.lightened(0.22))
+			for st in range(h / steps + 2, h, 3):
+				img.fill_rect(Rect2i(w / 2 - 4, st, 8, 1), wall.darkened(0.25))
+			# crown shrine + eternal fires
+			img.fill_rect(Rect2i(w / 2 - 6, 0, 12, h / steps), dark)
+			img.fill_rect(Rect2i(w / 2 - 3, 2, 6, h / steps - 2), Color("#140e0a"))
+			img.set_pixel(w / 2 - 5, 1, lit)
+			img.set_pixel(w / 2 + 4, 1, lit)
+			# carved glyphs
+			for gy2 in range(h - 8, h - 2, 3):
+				for gx3 in range(4, w - 6, 9):
+					if randf() < 0.5:
+						img.set_pixel(gx3, gy2, wall.darkened(0.35))
+		"shrine":
+			img.fill_rect(Rect2i(2, 8, w - 4, h - 8), wall)
+			img.fill_rect(Rect2i(0, 5, w, 4), wall.darkened(0.3))   # slab roof
+			img.fill_rect(Rect2i(w / 2 - 3, h - 12, 7, 12), Color("#120c08"))  # doorway
+			img.set_pixel(3, 7, lit)      # torch
+			img.set_pixel(w - 4, 7, lit)
+			for gy3 in range(12, h - 4, 4):
+				if randf() < 0.6:
+					img.set_pixel(randi_range(4, w - 5), gy3, wall.darkened(0.3))
+		"warehouse":
+			img.fill_rect(Rect2i(0, 4, w, h - 4), wall)
+			img.fill_rect(Rect2i(0, 0, w, 5), roof)
+			var vx2 := 3
+			while vx2 < w - 2:   # corrugated ribs
+				img.fill_rect(Rect2i(vx2, 6, 1, h - 7), wall.darkened(0.18))
+				vx2 += 4
+			img.fill_rect(Rect2i(w / 4, h - 16, w / 2, 16), dark)   # sliding door
+			img.fill_rect(Rect2i(w / 4 + 2, h - 14, w / 2 - 4, 12), Color("#101418"))
+			img.fill_rect(Rect2i(w / 2 - 1, h - 16, 2, 16), wall.darkened(0.3))
+			for wx4 in range(5, w / 4, 8):
+				img.fill_rect(Rect2i(wx4, 8, 5, 4), lit if randf() < 0.5 else Color("#12181e"))
+			img.fill_rect(Rect2i(w - 14, 8, 5, 4), lit if randf() < 0.5 else Color("#12181e"))
+		"containers":
+			img.fill(Color(0, 0, 0, 0))
+			var cc := [Color("#7a3a30"), Color("#2e5a6a"), Color("#6a6a2e"), Color("#3e5a3a"), Color("#5a3a5e")]
+			var rows: int = maxi(2, h / 11)
+			for row in rows:
+				var cw2 := randi_range(16, 24)
+				var cx3 := randi_range(0, 6) if row < rows - 1 else 0
+				while cx3 + cw2 <= w:
+					var col2: Color = cc[randi() % cc.size()]
+					var cy2: int = h - (row + 1) * 11
+					img.fill_rect(Rect2i(cx3, cy2, cw2, 11), col2)
+					img.fill_rect(Rect2i(cx3, cy2, cw2, 2), col2.lightened(0.15))
+					for rib in range(cx3 + 2, cx3 + cw2 - 1, 3):
+						img.fill_rect(Rect2i(rib, cy2 + 2, 1, 9), col2.darkened(0.2))
+					cx3 += cw2 + randi_range(1, 4)
+					cw2 = randi_range(16, 24)
 		_:  # mall
 			img.fill_rect(Rect2i(0, 0, w, h), wall)
 			img.fill_rect(Rect2i(0, 0, w, 7), roof)
@@ -565,7 +667,10 @@ func _build_city() -> void:
 	for j in facades.size():
 		if facades[j].get_height() > facades[big_i].get_height():
 			big_i = j
-	buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
+	if city_def.get("cit_kind", "") != "":
+		buildings.append(_mk_building(x, _gen_lowrise(city_def.cit_kind), 2.2, true, city_def.cit_kind))
+	else:
+		buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
 	# strategic landmarks — destroy them to bend the war
 	var candidates: Array = []
 	for bi in buildings.size() - 1:
@@ -589,10 +694,15 @@ func _build_city() -> void:
 	for k in 8:
 		critters.append({"kind": "dog", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
 			"panic": false, "dead": false, "o": randf() * TAU})
-	if Global.city == "ashport":
+	if Global.city in ["ashport", "teotl"]:
 		for k in 12:
 			critters.append({"kind": "pig", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
 				"panic": false, "dead": false, "o": randf() * TAU})
+	# Port Maren is already half-drowned — standing water in the streets
+	if Global.city == "maren":
+		for k in 4:
+			var fx0 := randf_range(500, WORLD_W - 700)
+			flood.append({"x0": fx0, "x1": fx0 + randf_range(80, 180), "t_left": 1e9, "neutral": true})
 	for k in 26:
 		cars.append({"x": randf_range(300, WORLD_W - 400), "w": randf_range(14, 19), "dead": false,
 			"col": [Color("#20303a"), Color("#3a2030"), Color("#2a2a34"), Color("#1c2426")][randi() % 4]})
@@ -1640,6 +1750,8 @@ func _allies_update(delta: float) -> void:
 					_boom(u.pos, 10, Color(0.3, 0.9, 0.9), 80.0)
 		for pe in people:
 			if pe.pos.x >= fz.x0 and pe.pos.x <= fz.x1:
+				if fz.get("neutral", false):
+					continue
 				if fz.get("plague", false):
 					if not pe.has("inf"):
 						pe.inf = t + 3.0
