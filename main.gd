@@ -1,4 +1,4 @@
-﻿extends Node2D
+extends Node2D
 # CALAMITY v4 — The Swarm over New Kowloon.
 # Artist facades (Warped City, CC0 by ansimuz) + HDR glow + carved destruction.
 # 640x360 native. Ground y=0, up negative. Facades sliced from sheet at load.
@@ -13,19 +13,29 @@ const CITY_DEFS := {
 		"big_chance": 0.28, "gap_min": 14.0, "gap_max": 48.0, "spawn_mult": 1.0,
 		"moon": Color(1.55, 0.35, 0.3), "moon_r": 20.0, "lamp": Color(1.9, 1.5, 0.9),
 		"aurora": false, "smog": false, "street": Color("#383050"),
-		"mix": {"tower": 0.52, "house": 0.12, "shop": 0.2, "church": 0.03, "school": 0.05, "mall": 0.08}},
+		"mix": {"tower": 0.52, "house": 0.12, "shop": 0.2, "church": 0.03, "school": 0.05, "mall": 0.08},
+		"facade_sheet": "res://art/near-buildings-bg.png", "house_art": [],
+		"far_tex": "res://art/skyline-a.png", "mid_tex": "res://art/buildings-bg.png",
+		"far_scale": 0.45, "mid_scale": 1.4},
 	"thornspire": {"name": "THORNSPIRE", "tint": Color(0.85, 0.9, 1.35), "defense": 1.35,
 		"sky": [Color("#020308"), Color("#070c22"), Color("#101a40"), Color("#1c2c58"), Color("#2a4470")],
 		"big_chance": 0.55, "gap_min": 8.0, "gap_max": 26.0, "spawn_mult": 1.0,
 		"moon": Color(1.6, 1.7, 2.0), "moon_r": 30.0, "lamp": Color(1.2, 1.7, 2.0),
 		"aurora": true, "smog": false, "street": Color("#2a3450"),
-		"mix": {"tower": 0.42, "house": 0.14, "shop": 0.12, "church": 0.14, "school": 0.06, "mall": 0.12}},
+		"mix": {"tower": 0.42, "house": 0.3, "shop": 0.08, "church": 0.1, "school": 0.04, "mall": 0.06},
+		"facade_sheet": "res://art/cities/thornspire/church-slabs.png",
+		"house_art": ["res://art/cities/thornspire/house-a.png", "res://art/cities/thornspire/house-b.png", "res://art/cities/thornspire/house-c.png"],
+		"far_tex": "res://art/cities/thornspire/background.png", "mid_tex": "res://art/cities/thornspire/middleground.png",
+		"far_scale": 0.8, "mid_scale": 0.85},
 	"ashport": {"name": "ASHPORT", "tint": Color(1.18, 0.82, 0.5), "defense": 0.75,
 		"sky": [Color("#0f0a06"), Color("#241408"), Color("#42250c"), Color("#663a10"), Color("#8a5416")],
 		"big_chance": 0.10, "gap_min": 24.0, "gap_max": 70.0, "spawn_mult": 1.7,
 		"moon": Color(1.3, 0.7, 0.25), "moon_r": 13.0, "lamp": Color(1.9, 1.1, 0.4),
 		"aurora": false, "smog": true, "street": Color("#403020"),
-		"mix": {"tower": 0.16, "house": 0.38, "shop": 0.2, "church": 0.04, "school": 0.06, "mall": 0.16}},
+		"mix": {"tower": 0.42, "house": 0.2, "shop": 0.14, "church": 0.02, "school": 0.06, "mall": 0.16},
+		"facade_sheet": "res://art/cities/ashport/factories.png", "house_art": [],
+		"far_tex": "res://art/cities/ashport/far.png", "mid_tex": "res://art/cities/ashport/scaffolds.png",
+		"far_scale": 0.9, "mid_scale": 1.0},
 }
 const END_TEXT := {
 	"swarm": {"win": "CITY RAZED", "win_s": "the swarm moves on, fat with light and marrow.",
@@ -85,6 +95,7 @@ func _ready() -> void:
 	if character == "tzitzimitl":
 		for i in 16:
 			segs.append(pos)
+		_bake_serpent()
 	_setup_env()
 	_setup_sfx()
 	_slice_facades()
@@ -116,6 +127,79 @@ func _ready() -> void:
 	swarm_light.texture_scale = 2.2
 	add_child(swarm_light)
 	_build_hud()
+
+func _bake_serpent() -> void:
+	# hand-baked pixel sprites, drawn once — outline + shading like real sheet art
+	var OUT := Color("#120810")
+	var EM1 := Color("#1e5c3a")   # emerald dark
+	var EM2 := Color("#2e8a52")   # emerald
+	var EM3 := Color("#4ec072")   # emerald light
+	var GLD := Color("#e8b040")   # gold
+	var GLD2 := Color("#f8dc80")
+	var RED := Color("#d84830")
+	# --- head 26x20, faces +X ---
+	var h := Image.create(26, 20, false, Image.FORMAT_RGBA8)
+	for px in [[4,8,16,8,EM2],[6,7,14,4,EM3],[4,12,14,4,EM1],[16,9,7,3,EM2],[20,10,4,2,EM1],
+			[6,6,10,2,EM3],[8,14,8,3,GLD],[10,16,6,2,GLD2]]:
+		h.fill_rect(Rect2i(px[0], px[1], px[2], px[3]), px[4])
+	# jaw fangs
+	h.fill_rect(Rect2i(21, 12, 3, 1), GLD2)
+	h.set_pixel(22, 13, GLD2)
+	# eye
+	h.fill_rect(Rect2i(14, 9, 3, 3), OUT)
+	h.fill_rect(Rect2i(15, 10, 2, 1), Color(2.4, 1.5, 0.3))
+	# crest feathers sweeping back
+	for c in [[2,2,RED],[0,5,GLD],[1,0,RED],[4,4,GLD]]:
+		h.fill_rect(Rect2i(c[0], c[1], 5, 2), c[2])
+		h.fill_rect(Rect2i(c[0] + 1, c[1] + 1, 4, 1), Color(c[2].r * 1.3, c[2].g * 1.3, c[2].b * 1.3))
+	_outline(h, OUT)
+	serp_head = ImageTexture.create_from_image(h)
+	# --- body segment 14x16, plume on top ---
+	var b := Image.create(14, 16, false, Image.FORMAT_RGBA8)
+	b.fill_rect(Rect2i(2, 6, 10, 7), EM2)
+	b.fill_rect(Rect2i(3, 6, 8, 2), EM3)
+	b.fill_rect(Rect2i(2, 11, 10, 2), EM1)
+	b.fill_rect(Rect2i(3, 13, 8, 2), GLD)     # belly
+	# dorsal plume
+	b.fill_rect(Rect2i(5, 1, 2, 5), RED)
+	b.fill_rect(Rect2i(8, 2, 2, 4), GLD)
+	b.fill_rect(Rect2i(3, 3, 2, 3), RED)
+	_outline(b, OUT)
+	serp_body = ImageTexture.create_from_image(b)
+	# --- wing 30x22, root at bottom-left ---
+	var w := Image.create(30, 22, false, Image.FORMAT_RGBA8)
+	for fb in 4:
+		var ang := 0.5 + fb * 0.32
+		for L in 22 - fb * 3:
+			var px2 := int(2 + cos(ang) * L)
+			var py2 := int(19 - sin(ang) * L)
+			if px2 >= 0 and px2 < 29 and py2 >= 1 and py2 < 21:
+				var fc: Color = GLD if fb % 2 == 0 else EM2
+				w.set_pixel(px2, py2, fc)
+				w.set_pixel(px2 + 1, py2, fc)
+				if L > 14 - fb * 3:
+					w.set_pixel(px2, py2 - 1, GLD2 if fb % 2 == 0 else EM3)
+	_outline(w, OUT)
+	serp_wing = ImageTexture.create_from_image(w)
+
+func _outline(img: Image, col: Color) -> void:
+	var wd := img.get_width()
+	var ht := img.get_height()
+	var src := Image.new()
+	src.copy_from(img)
+	for y in ht:
+		for x in wd:
+			if src.get_pixel(x, y).a > 0.1:
+				continue
+			var edge := false
+			for off in [[1, 0], [-1, 0], [0, 1], [0, -1]]:
+				var nx: int = x + off[0]
+				var ny: int = y + off[1]
+				if nx >= 0 and nx < wd and ny >= 0 and ny < ht and src.get_pixel(nx, ny).a > 0.1:
+					edge = true
+					break
+			if edge:
+				img.set_pixel(x, y, col)
 
 func _setup_sfx() -> void:
 	for i in 10:
@@ -191,8 +275,10 @@ func _radial_tex(size: int) -> ImageTexture:
 			img.set_pixel(x, y, Color(1, 1, 1, clampf(1.0 - d, 0.0, 1.0) ** 2))
 	return ImageTexture.create_from_image(img)
 
+var house_imgs: Array = []
+
 func _slice_facades() -> void:
-	var sheet: Image = load("res://art/near-buildings-bg.png").get_image()
+	var sheet: Image = load(city_def.facade_sheet).get_image()
 	if sheet.is_compressed():
 		sheet.decompress()
 	sheet.convert(Image.FORMAT_RGBA8)
@@ -224,9 +310,18 @@ func _slice_facades() -> void:
 						break
 				facades.append(strip.get_region(Rect2i(0, top, strip.get_width(), h - top)))
 			run_start = -1
-	tex_sky_a = load("res://art/skyline-a.png")
-	tex_sky_b = load("res://art/skyline-b.png")
-	tex_mid = load("res://art/buildings-bg.png")
+	tex_sky_a = load(city_def.far_tex)
+	tex_sky_b = load("res://art/skyline-b.png")   # only used by kowloon's alternating far layer
+	tex_mid = load(city_def.mid_tex)
+	# artist houses (thornspire) — scaled to world size, nearest-neighbor
+	for hp2 in city_def.house_art:
+		var hi: Image = load(hp2).get_image()
+		if hi.is_compressed():
+			hi.decompress()
+		hi.convert(Image.FORMAT_RGBA8)
+		var sc := 0.38
+		hi.resize(int(hi.get_width() * sc), int(hi.get_height() * sc), Image.INTERPOLATE_NEAREST)
+		house_imgs.append(hi)
 
 # ---------- procedural low-rise generator (pack-palette pixel art) ----------
 const PAL_WALL := [Color("#241726"), Color("#2c1a22"), Color("#1e1c2e"), Color("#2a2030")]
@@ -369,9 +464,13 @@ func _build_city() -> void:
 			x += f.get_width() * sc + randf_range(city_def.gap_min, city_def.gap_max)
 			i += 1
 		elif kind == "house":
-			# houses come in rows
+			# houses come in rows — artist houses when the city has them
 			for hn in randi_range(2, 4):
-				var hi := _gen_lowrise("house")
+				var hi: Image
+				if house_imgs.is_empty():
+					hi = _gen_lowrise("house")
+				else:
+					hi = house_imgs[randi() % house_imgs.size()]
 				buildings.append(_mk_building(x, hi, 1.0, false, "house"))
 				x += hi.get_width() + randf_range(4, 10)
 			x += randf_range(city_def.gap_min, city_def.gap_max)
@@ -418,7 +517,7 @@ func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "to
 	var img := Image.new()
 	img.copy_from(src)
 	# bake a neon banner / sign onto tower walls — destruction eats it with the wall
-	if kind == "tower" and not cit and randf() < 0.5 and not banner_imgs.is_empty():
+	if kind == "tower" and not cit and randf() < 0.5 and not banner_imgs.is_empty() and Global.city != "thornspire":
 		var bn: Image = banner_imgs[randi() % banner_imgs.size()]
 		if bn.get_width() < img.get_width() - 8 and bn.get_height() < img.get_height() - 20:
 			var bx := randi_range(4, img.get_width() - bn.get_width() - 4)
@@ -430,7 +529,7 @@ func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "to
 	return {"x": x, "w": w, "h": h, "sc": sc, "img": img,
 		"tex": ImageTexture.create_from_image(img),
 		"hp": mass, "maxhp": mass, "holes": [], "dead": false, "dying": 0.0, "cit": cit,
-		"cur_h": h, "seed": x * 0.77, "burn": 0.0, "kind": kind}
+		"cur_h": h, "seed": x * 0.77, "burn": 0.0, "kind": kind, "flames": []}
 
 func _hash(n: float) -> float:
 	return fmod(absf(sin(n * 127.1) * 43758.55), 1.0)
@@ -492,6 +591,8 @@ func _process(delta: float) -> void:
 	# biomass threshold -> evolution draft (all calamities)
 	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
 		_open_draft()
+	# dusk falls into night with time and violence; a devoured sun ends the argument
+	night_f = 1.0 if sun_eaten else clampf(maxf(t / 160.0, threat / 75.0) + 0.12, 0.12, 1.0)
 	if not over:
 		match character:
 			"keraunos":
@@ -523,8 +624,6 @@ func _process(delta: float) -> void:
 			b.hp -= b.burn * 1.6 * delta
 			b.burn = maxf(0.0, b.burn - 0.35 * delta)
 			score_f += b.burn * 0.4 * delta * combo * TIER_MULT[tier]
-			if randf() < b.burn * 2.0 * delta:
-				_fire(Vector2(b.x + randf() * b.w, -b.cur_h + randf() * b.cur_h * 0.6))
 			if randf() < b.burn * 0.4 * delta:
 				_carve(b, Vector2(b.x + randf_range(4, b.w - 4), -randf_range(6, b.cur_h - 6)), 3.0)
 			if b.hp <= 0.0:
@@ -564,7 +663,7 @@ func _people(delta: float) -> void:
 		var d: float = pos.x - p.pos.x
 		if absf(d) < 90.0 and pos.y > -60.0:
 			p.panic = true
-		if eclipse_t > 0.0:
+		if blackout_t > 0.0:
 			p.panic = true   # the sun is gone — everyone runs
 		if p.panic:
 			p.vx = move_toward(p.vx, -signf(d) * 46.0, 200.0 * delta)
@@ -575,7 +674,7 @@ func _people(delta: float) -> void:
 	# critters scatter
 	for cr in critters:
 		var d2: float = pos.x - cr.pos.x
-		if (absf(d2) < 110.0 and pos.y > -80.0) or eclipse_t > 0.0:
+		if (absf(d2) < 110.0 and pos.y > -80.0) or blackout_t > 0.0:
 			cr.panic = true
 		match cr.kind:
 			"pigeon":
@@ -641,14 +740,21 @@ var segs: Array = []             # serpent body trail
 var dive_t := 0.0
 var dive_dir := Vector2.RIGHT
 var dive_cd := 0.0
-var eclipse_t := 0.0
-var eclipse_len := 10.0
+# --- day-night arc + the devoured sun ---
+var night_f := 0.0               # 0 = dusk, 1 = full night (advances with time + threat)
+var sun_eaten := false           # permanent — the serpent swallowed the light
+var blackout_t := 0.0            # deep-dark shock window right after the devouring
+var devour_anim := 0.0
+var eclipse_len := 10.0          # length of the blackout shock (SUN-EATER: 16)
 var eclipse_cost := 80.0
 var pierced_this_dive := 0
 var feathers: Array = []         # {pos, vy, t_left}
 # sfx
 var sfx_players: Array = []
 var sfx_bank := {}
+var serp_head: Texture2D
+var serp_body: Texture2D
+var serp_wing: Texture2D
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
@@ -928,7 +1034,7 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 			_carve(b, hit + Vector2(randf_range(-8, 8), randf_range(5, 13)), 7.0 * power)
 			b.holes.append({"p": hit - Vector2(b.x, -b.h), "o": randf() * TAU})
 			b.hp -= 75.0 * power
-			b.burn += (4.5 if nodes.has("overcharge") else 2.5) * power
+			_ignite(b, (4.5 if nodes.has("overcharge") else 2.5) * power)
 			var gain: float = 75.0 * power * 1.6 * combo * TIER_MULT[tier]
 			score_f += gain
 			bio += 9.0 * power
@@ -971,7 +1077,7 @@ func _skyfall(p: Vector2) -> void:
 				_carve(b, Vector2(p.x + randf_range(-3, 3), yy), w_col * 0.55)
 				yy += w_col * 0.8
 			b.hp -= 260.0
-			b.burn += 5.0
+			_ignite(b, 5.0)
 			score_f += 260.0 * combo * TIER_MULT[tier]
 			bio += 20.0
 			if b.hp <= 0.0:
@@ -1011,20 +1117,20 @@ func _tzitzi_move(delta: float) -> void:
 			segs.pop_back()
 
 func _tzitzi(delta: float) -> void:
-	if eclipse_t > 0.0:
-		eclipse_t -= delta
-		if eclipse_t <= 0.0 and nodes.has("blackdawn"):
-			dark_perm = 0.3
+	if blackout_t > 0.0:
+		blackout_t -= delta
+	devour_anim = maxf(0.0, devour_anim - delta)
+	if sun_eaten:
 		if branch == "suneater":
-			# the army wilts in the dark
+			# the army wilts in the endless dark
 			for u in units:
-				if randf() < 0.25 * delta * 4.0:
+				if randf() < (0.9 if blackout_t > 0.0 else 0.3) * delta:
 					u.hp = u.get("hp", 1) - 1
 					if u.hp <= 0:
 						u.dead = true
 						_kill_unit(u)
 			units = units.filter(func(u): return not u.get("dead", false))
-		if nodes.has("rain") and randf() < 6.0 * delta:
+		if nodes.has("rain") and blackout_t > 0.0 and randf() < 6.0 * delta:
 			feathers.append({"pos": Vector2(cam.position.x + randf_range(-320, 320), -randf_range(200, 340)),
 				"vy": randf_range(40, 90), "t_left": 6.0})
 	# feathers fall and cut
@@ -1047,7 +1153,7 @@ func _tzitzi(delta: float) -> void:
 	units = units.filter(func(u): return not u.get("dead", false))
 	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var cd_base: float = 0.55 * (0.6 if nodes.has("serration") else 1.0)
-	var cd_needed: float = cd_base * (0.5 if eclipse_t > 0.0 else 1.0)
+	var cd_needed: float = cd_base * (0.5 if (blackout_t > 0.0 or sun_eaten) else 1.0)
 	if lmb and not lmb_prev and dive_cd <= 0.0:
 		dive_cd = cd_needed
 		dive_t = 0.22
@@ -1060,16 +1166,20 @@ func _tzitzi(delta: float) -> void:
 			for i in n_f:
 				feathers.append({"pos": pos + Vector2(randf_range(-14, 14), randf_range(-10, 10)),
 					"vy": randf_range(14, 30), "t_left": 7.0})
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= eclipse_cost and eclipse_t <= 0.0:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= eclipse_cost and not sun_eaten:
+		# THE SERPENT DEVOURS THE SUN — once, forever
 		rmb_cd = 1.0
 		meter -= eclipse_cost
-		eclipse_t = eclipse_len
-		shake = 8.0
+		sun_eaten = true
+		blackout_t = eclipse_len
+		devour_anim = 1.4
+		shake = 14.0
 		_sfx("eclipse")
-		_pop(pos + Vector2(0, -26), "E C L I P S E", Color(2.0, 1.2, 0.4))
+		_pop(pos + Vector2(0, -26),
+			"THE SUN IS DEVOURED" if night_f < 0.75 else "THE PALE WITNESS DIES", Color(2.0, 1.2, 0.4))
 	# diving: pierce everything on the path
 	if dive_t > 0.0:
-		var mult: float = 1.6 if eclipse_t > 0.0 else 1.0
+		var mult: float = 1.6 if blackout_t > 0.0 else (1.3 if sun_eaten else 1.0)
 		mult *= 1.0 + 0.15 * pierced_this_dive   # chain bonus per building pierced
 		var carve_r: float = 10.0 if branch == "obsidian" else 7.0
 		for b in buildings:
@@ -1082,7 +1192,7 @@ func _tzitzi(delta: float) -> void:
 				_carve(b, pos, carve_r)
 				b.hp -= 5.5 * mult
 				if nodes.has("cleave"):
-					b.burn += 1.2 * delta * 60.0 * 0.05
+					_ignite(b, 1.2 * delta * 3.0)
 				var gain: float = 8.0 * combo * TIER_MULT[tier] * mult
 				score_f += gain
 				bio += 1.4
@@ -1097,8 +1207,8 @@ func _tzitzi(delta: float) -> void:
 		for u in units:
 			if (u.pos + Vector2(0, -8)).distance_to(pos) < 16.0:
 				u.dead = true
-				if nodes.has("gorger") and eclipse_t > 0.0:
-					meter = minf(100.0, meter + 8.0)
+				if nodes.has("gorger") and (blackout_t > 0.0 or sun_eaten):
+					hp = minf(100.0, hp + 3.0)
 				_kill_unit(u)
 		units = units.filter(func(u): return not u.get("dead", false))
 		for pe in people:
@@ -1222,6 +1332,24 @@ func _rmb_active() -> void:
 		shake = maxf(shake, 4.0)
 		combo_idle = 0.0
 
+func _ignite(b: Dictionary, amt: float) -> void:
+	var had: float = b.burn
+	b.burn = minf(8.0, b.burn + amt)
+	if not b.has("flames"):
+		b.flames = []
+	# each full point of burn plants a flame anchor (roofline or wound)
+	while b.flames.size() < int(b.burn) and b.flames.size() < 6:
+		var fx: float = randf_range(4.0, b.w - 4.0)
+		var fy: float = -b.cur_h + randf_range(0.0, b.cur_h * 0.4)
+		if not b.holes.is_empty() and randf() < 0.5:
+			var hole: Dictionary = b.holes[randi() % b.holes.size()]
+			var hp3: Vector2 = hole.p + Vector2(0, -b.h)
+			fx = clampf(hp3.x, 4.0, b.w - 4.0)
+			fy = clampf(hp3.y, -b.h, -2.0)
+		b.flames.append({"p": Vector2(fx, fy), "s": randf_range(0.8, 1.6), "o": randf() * TAU})
+	if had < 0.2 and b.burn >= 0.2:
+		_sfx("boom")
+
 func _collapse(b: Dictionary) -> void:
 	if b.dying > 0.0 or b.dead:
 		return
@@ -1290,7 +1418,7 @@ func _hit_props(p: Vector2, r: float) -> void:
 		_explode(Vector2(c.x + c.w * 0.5, -5), "car")
 		for b in buildings:
 			if not b.dead and b.dying <= 0.0 and c.x + c.w * 0.5 >= b.x and c.x <= b.x + b.w:
-				b.burn += 0.8
+				_ignite(b, 0.8)
 				break
 
 func _shockwave(p: Vector2, r: float) -> void:
@@ -1394,9 +1522,9 @@ const NODE_DEFS := {
 		{"id": "conductor", "name": "CONDUCTOR", "kind": "PASSIVE", "desc": "skyfall costs 25 storm instead of 40"},
 	],
 	"suneater": [
-		{"id": "blackdawn", "name": "BLACK DAWN", "kind": "PASSIVE", "desc": "after your first eclipse, a permanent gloom stays — the army never fully sees again"},
-		{"id": "gorger", "name": "STAR GORGER", "kind": "PASSIVE", "desc": "kills during eclipse feed your hunger back"},
-		{"id": "voidheart", "name": "VOIDHEART", "kind": "PASSIVE", "desc": "eclipse costs 55 hunger instead of 80"},
+		{"id": "blackdawn", "name": "APHOTIC", "kind": "PASSIVE", "desc": "the devouring's blackout shock lasts 8 seconds longer"},
+		{"id": "gorger", "name": "STAR GORGER", "kind": "PASSIVE", "desc": "kills in the dark knit your body back together"},
+		{"id": "voidheart", "name": "VOIDHEART", "kind": "PASSIVE", "desc": "devouring the sun costs 55 hunger instead of 80"},
 	],
 	"obsidian": [
 		{"id": "sonicboom", "name": "SONIC BOOM", "kind": "PASSIVE", "desc": "every dive ends in a concussive shockwave"},
@@ -1459,6 +1587,7 @@ func _pick_draft(id: String) -> void:
 				max_grabs = 2
 			"fourthhead": bolt_max += 1.0
 			"voidheart": eclipse_cost = 55.0
+			"blackdawn": eclipse_len += 8.0
 	bio_stage += 1
 	draft_open = false
 	if draft_layer:
@@ -1518,7 +1647,7 @@ func _army(delta: float) -> void:
 	var defense: float = city_def.defense
 	spawn_cd -= delta
 	var cap: int = int((2 + tier * 3) * city_def.spawn_mult)
-	if tier >= 1 and spawn_cd <= 0.0 and units.size() < cap and stun_t <= 0.0 and eclipse_t <= 0.0:
+	if tier >= 1 and spawn_cd <= 0.0 and units.size() < cap and stun_t <= 0.0 and blackout_t <= 0.0:
 		spawn_cd = maxf(0.3, (1.4 - tier * 0.18) / city_def.spawn_mult)
 		var side: float = -1.0 if randf() < 0.5 else 1.0
 		var x: float = pos.x + side * randf_range(360, 560)
@@ -1581,9 +1710,9 @@ func _army(delta: float) -> void:
 			else:
 				var speed: float = 120.0 if u.kind in ["police", "soldier"] else 165.0
 				var dirv := (lead - origin).normalized()
-				if eclipse_t > 0.0:
+				if blackout_t > 0.0:
 					dirv = dirv.rotated(randf_range(-0.55, 0.55))  # blind in the dark
-				elif dark_perm > 0.0:
+				elif sun_eaten or dark_perm > 0.0:
 					dirv = dirv.rotated(randf_range(-0.3, 0.3))
 				shells.append({"pos": origin, "vel": dirv * speed, "life": 4.0,
 					"heavy": not (u.kind in ["police", "soldier"])})
@@ -1696,7 +1825,7 @@ func _build_hud() -> void:
 		"keraunos":
 			help.text = "WASD — fly.  LMB — lightning strike at cursor (3 banked).  RMB — TEMPEST at full storm.  ESC — menu."
 		"tzitzimitl":
-			help.text = "serpent follows your cursor.  LMB — lance dive (pierces buildings).  RMB — ECLIPSE at full hunger.  ESC — menu."
+			help.text = "serpent follows your cursor.  LMB — lance dive (pierces buildings).  RMB — DEVOUR THE SUN at full hunger.  ESC — menu."
 		_:
 			help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / evolved skill.  R — restart.  ESC — menu."
 
@@ -1736,11 +1865,14 @@ func _hud_update() -> void:
 			hud.biolbl.text = ("STORM READY — RMB" if meter >= need else "STORM — RMB at %d" % int(need))
 			hud.bio.size.x = 152.0 * clampf(meter / 100.0, 0.0, 1.0)
 		"tzitzimitl":
-			if eclipse_t > 0.0:
-				hud.biolbl.text = "E C L I P S E"
-				hud.bio.size.x = 152.0 * eclipse_t / eclipse_len
+			if blackout_t > 0.0:
+				hud.biolbl.text = "T H E   D E V O U R I N G"
+				hud.bio.size.x = 152.0 * blackout_t / eclipse_len
+			elif sun_eaten:
+				hud.biolbl.text = "THE SUN IS DEAD — the dark is yours"
+				hud.bio.size.x = 152.0
 			else:
-				hud.biolbl.text = "SUN-HUNGER — RMB ECLIPSE at full" if meter < eclipse_cost else "ECLIPSE READY — RMB"
+				hud.biolbl.text = "SUN-HUNGER — RMB devours the sun" if meter < eclipse_cost else "RMB — DEVOUR THE SUN"
 				hud.bio.size.x = 152.0 * clampf(meter / eclipse_cost, 0.0, 1.0)
 		_:
 			if bio_stage >= BIO_THRESH.size():
@@ -1764,10 +1896,10 @@ func _draw() -> void:
 		_draw_building(b)
 	_draw_street(left, right)
 	# eclipse gloom sits UNDER the living things — fires, beasts and armies stay vivid
-	var dark_a: float = maxf(clampf(eclipse_t / 1.5, 0.0, 1.0) * 0.5, dark_perm)
+	var dark_a: float = maxf(clampf(blackout_t / 1.5, 0.0, 1.0) * 0.5, (0.3 if sun_eaten else 0.0))
 	if dark_a > 0.0:
 		draw_rect(Rect2(left, -380, right - left, 780), Color(0.01, 0.0, 0.03, dark_a))
-		if eclipse_t > 0.0:
+		if blackout_t > 0.0:
 			var moon2 := Vector2(cam.position.x + 140, -250.0)
 			draw_circle(moon2, city_def.moon_r + 4.0, Color(0.02, 0.0, 0.03))
 			draw_circle(moon2, city_def.moon_r + 6.0, Color(1.8, 0.9, 0.3, 0.35))
@@ -1799,6 +1931,8 @@ func _draw() -> void:
 	draw_rect(Rect2(left, -30, right - left, 34), Color(0.3, 0.12, 0.3, 0.08))
 	draw_rect(Rect2(left, 14, right - left, 400), Color(0.01, 0.0, 0.03, 0.55))
 
+const DUSK_SKY := [Color("#3a2a50"), Color("#7a3a50"), Color("#c05a3c"), Color("#e8924e"), Color("#f8c877")]
+
 func _draw_sky(left: float, right: float, cx: float) -> void:
 	var g: Array = city_def.sky
 	var top := -380.0
@@ -1806,20 +1940,40 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 	for i in rows:
 		var f := float(i) / rows
 		var col: Color
+		var dcol: Color
 		if f < 0.4:
 			col = g[0].lerp(g[1], f / 0.4)
+			dcol = DUSK_SKY[0].lerp(DUSK_SKY[1], f / 0.4)
 		elif f < 0.68:
 			col = g[1].lerp(g[2], (f - 0.4) / 0.28)
+			dcol = DUSK_SKY[1].lerp(DUSK_SKY[2], (f - 0.4) / 0.28)
 		elif f < 0.88:
 			col = g[2].lerp(g[3], (f - 0.68) / 0.2)
+			dcol = DUSK_SKY[2].lerp(DUSK_SKY[3], (f - 0.68) / 0.2)
 		else:
 			col = g[3].lerp(g[4], (f - 0.88) / 0.12)
-		draw_rect(Rect2(left, top + f * 380.0, right - left, 380.0 / rows + 1), col)
+			dcol = DUSK_SKY[3].lerp(DUSK_SKY[4], (f - 0.88) / 0.12)
+		draw_rect(Rect2(left, top + f * 380.0, right - left, 380.0 / rows + 1), dcol.lerp(col, night_f))
 	for i in 60:
 		var sxr := fmod(_hash(i * 3.7) * 4310.0, 1.0) * (right - left) + left
 		var syr := -378.0 + _hash(i * 9.1) * 190.0
 		if fmod(t * (0.4 + fmod(float(i), 3.0) * 0.3) + i, 2.0) < 1.5:
-			draw_rect(Rect2(sxr, syr, 1, 1), Color(0.9, 0.92, 1.0, 0.5 * (1.0 - (syr + 378.0) / 200.0)))
+			draw_rect(Rect2(sxr, syr, 1, 1),
+				Color(0.9, 0.92, 1.0, 0.5 * night_f * (1.0 - (syr + 378.0) / 200.0)))
+	# THE SUN — low, dying, and edible
+	if not sun_eaten or devour_anim > 0.0:
+		var sun := Vector2(cx - 150, lerpf(-190.0, 25.0, clampf(night_f / 0.92, 0.0, 1.0)))
+		if sun.y < 20.0:
+			var sr := 26.0
+			for gi in range(5, 0, -1):
+				draw_circle(sun, sr + gi * 9.0, Color(1.4, 0.7, 0.3, 0.05))
+			draw_circle(sun, sr, Color(1.9, 1.05, 0.4))
+			draw_circle(sun + Vector2(-6, -5), sr * 0.75, Color(2.1, 1.3, 0.55))
+			if devour_anim > 0.0:
+				# the serpent's shadow closes around the sun
+				var prog: float = 1.0 - devour_anim / 1.4
+				draw_circle(sun, sr * 1.15 * prog, Color(0.03, 0.01, 0.05))
+				draw_circle(sun, sr * 1.15 * prog + 2.0, Color(1.9, 1.2, 0.4, 0.5 * prog))
 	# city aurora / smog signatures
 	if city_def.aurora:
 		for i in 3:
@@ -1835,43 +1989,46 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 		for i in 4:
 			draw_rect(Rect2(left, -180.0 + i * 34.0 + sin(t * 0.3 + i) * 6.0, right - left, 16.0),
 				Color(0.28, 0.2, 0.12, 0.13))
-	# the moon — each city under a different witness
-	var mc: Color = city_def.moon
-	var mr: float = city_def.moon_r
-	var moon := Vector2(cx + 140, -250.0)
-	draw_circle(moon, mr * 1.3, Color(mc.r * 0.4, mc.g * 0.25, mc.b * 0.25, 0.35))
-	draw_circle(moon, mr, mc)
-	draw_circle(moon + Vector2(-mr * 0.25, -mr * 0.2), mr * 0.8, mc.lightened(0.1))
-	draw_circle(moon + Vector2(mr * 0.3, mr * 0.25), mr * 0.2, mc.darkened(0.2))
-	draw_circle(moon + Vector2(-mr * 0.45, mr * 0.35), mr * 0.13, mc.darkened(0.2))
+	# the moon rises as night falls — unless the serpent already ate the sky
+	if night_f > 0.55 and not sun_eaten:
+		var ma: float = clampf((night_f - 0.55) / 0.3, 0.0, 1.0)
+		var mc: Color = city_def.moon
+		var mr: float = city_def.moon_r
+		var moon := Vector2(cx + 140, lerpf(-190.0, -250.0, ma))
+		draw_circle(moon, mr * 1.3, Color(mc.r * 0.4, mc.g * 0.25, mc.b * 0.25, 0.35 * ma))
+		draw_circle(moon, mr, Color(mc.r, mc.g, mc.b, ma))
+		draw_circle(moon + Vector2(-mr * 0.25, -mr * 0.2), mr * 0.8, Color(mc.lightened(0.1).r, mc.lightened(0.1).g, mc.lightened(0.1).b, ma))
+		draw_circle(moon + Vector2(mr * 0.3, mr * 0.25), mr * 0.2, Color(mc.darkened(0.2).r, mc.darkened(0.2).g, mc.darkened(0.2).b, ma))
 
 func _draw_backdrop(left: float, right: float, cx: float) -> void:
 	# city glow band on the horizon (blooms slightly)
 	draw_rect(Rect2(left, -120, right - left, 60), Color(0.5, 0.16, 0.4, 0.10))
 	draw_rect(Rect2(left, -80, right - left, 80), Color(0.85, 0.3, 0.5, 0.14))
-	# far skyline: low silhouette strip on the horizon
-	var sw: float = tex_sky_a.get_width()
-	var sh: float = tex_sky_a.get_height() * 0.45
+	# far layer, seated on the horizon
+	var kowloon := Global.city == "kowloon"
+	var far_tint := Color(0.36, 0.3, 0.6, 1) if kowloon else Color(0.5, 0.45, 0.62, 1)
+	var sw: float = tex_sky_a.get_width() * city_def.far_scale
+	var sh: float = tex_sky_a.get_height() * city_def.far_scale
 	var f := 0.15
 	var xoff := -cx * f
 	var start: float = floor((left - xoff) / sw) * sw + xoff
 	var xi := start
 	var k := int(floor((left - xoff) / sw))
 	while xi < right:
-		var tx: Texture2D = tex_sky_a if k % 2 == 0 else tex_sky_b
-		draw_texture_rect(tx, Rect2(xi, -sh, sw, sh), false, Color(0.36, 0.3, 0.6, 1))
+		var tx: Texture2D = (tex_sky_a if k % 2 == 0 else tex_sky_b) if kowloon else tex_sky_a
+		draw_texture_rect(tx, Rect2(xi, -sh, sw, sh), false, far_tint)
 		xi += sw
 		k += 1
 	draw_rect(Rect2(left, -sh, right - left, sh), Color(0.12, 0.08, 0.24, 0.45))
 	# mid layer: taller, closer, clearer
-	var mw: float = tex_mid.get_width() * 1.4
-	var mh: float = tex_mid.get_height() * 1.4
+	var mw: float = tex_mid.get_width() * city_def.mid_scale
+	var mh: float = tex_mid.get_height() * city_def.mid_scale
 	f = 0.4
 	xoff = -cx * f
 	start = floor((left - xoff) / mw) * mw + xoff
 	xi = start
 	while xi < right:
-		draw_texture_rect(tex_mid, Rect2(xi, -mh, mw, mh), false, Color(0.55, 0.45, 0.8, 1))
+		draw_texture_rect(tex_mid, Rect2(xi, -mh, mw, mh), false, Color(0.55, 0.48, 0.75, 1))
 		xi += mw
 	draw_rect(Rect2(left, -mh, right - left, mh), Color(0.1, 0.06, 0.2, 0.35))
 
@@ -1887,13 +2044,39 @@ func _draw_building(b: Dictionary) -> void:
 	var vis_frac: float = b.cur_h / b.h
 	var src := Rect2(0, img_h * (1.0 - vis_frac), b.img.get_width(), img_h * vis_frac)
 	var tint: Color = city_def.tint
-	if eclipse_t > 0.0:
+	if blackout_t > 0.0:
 		tint = tint * Color(0.2, 0.18, 0.28)   # the serpent ate the light — windows die
-	elif dark_perm > 0.0:
-		tint = tint * Color(0.55, 0.5, 0.65)
+	elif sun_eaten or dark_perm > 0.0:
+		tint = tint * Color(0.45, 0.42, 0.55)
+	elif night_f < 1.0:
+		tint = tint * Color(1, 1, 1).lerp(Color(1.14, 1.02, 0.88), 1.0 - night_f)
 	draw_texture_rect_region(b.tex, Rect2(b.x, -b.cur_h, b.w, b.cur_h), src, tint)
-	if b.burn > 0.5:
-		draw_rect(Rect2(b.x, -b.cur_h, b.w, b.cur_h), Color(1.0, 0.4, 0.15, minf(0.18, b.burn * 0.03)))
+	# anchored flames — fire lives ON the building
+	if b.burn > 0.2:
+		for fa in b.get("flames", []):
+			var fp: Vector2 = Vector2(b.x, 0) + fa.p
+			if fp.y < -b.cur_h:
+				fp.y = -b.cur_h
+			var fs: float = fa.s * minf(1.0, b.burn * 0.4)
+			var wob: float = sin(t * 9.0 + fa.o) * 0.3 + sin(t * 23.0 + fa.o * 2.0) * 0.15
+			var h1: float = fs * (9.0 + sin(t * 7.0 + fa.o) * 2.5)
+			draw_circle(fp + Vector2(0, -2), fs * 5.0, Color(1.3, 0.4, 0.1, 0.13))
+			draw_colored_polygon(PackedVector2Array([
+				fp + Vector2(-fs * 3.2, 0), fp + Vector2(wob * h1 * 0.5 - fs, -h1),
+				fp + Vector2(wob * h1, -h1 * 1.25), fp + Vector2(wob * h1 * 0.5 + fs, -h1 * 0.8),
+				fp + Vector2(fs * 3.2, 0)]), Color(1.7, 0.55, 0.1, 0.9))
+			draw_colored_polygon(PackedVector2Array([
+				fp + Vector2(-fs * 1.8, 0), fp + Vector2(wob * h1 * 0.4, -h1 * 0.65),
+				fp + Vector2(fs * 1.8, 0)]), Color(2.2, 1.2, 0.3))
+			draw_colored_polygon(PackedVector2Array([
+				fp + Vector2(-fs * 0.9, 0), fp + Vector2(wob * h1 * 0.3, -h1 * 0.32),
+				fp + Vector2(fs * 0.9, 0)]), Color(2.6, 2.1, 0.9))
+			if randf() < 0.06:
+				parts.append({"pos": fp + Vector2(randf_range(-3, 3), -h1), "vel": Vector2(randf_range(-8, 8), randf_range(-30, -14)),
+					"life": randf_range(0.3, 0.8), "col": Color(2.2, 1.2, 0.4), "size": 1.5})
+			if randf() < 0.04:
+				parts.append({"pos": fp + Vector2(0, -h1 - 2), "vel": Vector2(randf_range(-6, 6), randf_range(-26, -14)),
+					"life": randf_range(1.0, 2.0), "col": Color(0.2, 0.18, 0.2), "fire": true, "smoke": true, "size": 3.5})
 	# spore pods pulsing in wounds
 	for pod in pods:
 		if pod.b == b:
@@ -1922,7 +2105,7 @@ func _draw_building(b: Dictionary) -> void:
 		draw_rect(Rect2(b.x, -b.cur_h - 3, b.w * minf(1.0, dmg * 1.15), 2), Color(1.6, 0.4, 0.25, 0.9))
 
 func _draw_street(left: float, right: float) -> void:
-	var lights_out: bool = eclipse_t > 0.0
+	var lights_out: bool = blackout_t > 0.0 or sun_eaten or night_f < 0.5
 	draw_rect(Rect2(left, 0, right - left, 2), city_def.street)
 	draw_rect(Rect2(left, 2, right - left, 6), Color("#1c1830"))
 	draw_rect(Rect2(left, 8, right - left, 400), Color("#100c1e"))
@@ -2245,11 +2428,46 @@ func _draw_tzitzi() -> void:
 	# crosshair
 	draw_circle(aim, 2.0, Color(1.8, 1.2, 0.4, 0.7))
 	draw_arc(aim, 5.0, 0, TAU, 12, Color(1.8, 1.2, 0.4, 0.4), 1.0)
-	var glow := eclipse_t > 0.0
+	var glow := blackout_t > 0.0 or sun_eaten
 	var n := segs.size()
 	if n < 3:
 		return
-	# ===== QUETZALCOATL — long, plumed, majestic =====
+	# ===== QUETZALCOATL — baked pixel sprites along the trail =====
+	var body_mod := Color(1.35, 1.35, 1.2) if glow else Color(1, 1, 1)
+	# wings first (behind body), at segment ~5, flapping
+	if n > 8:
+		var wroot: Vector2 = segs[5]
+		var walong: Vector2 = (segs[3] - segs[7])
+		var wang: float = walong.angle() if walong.length() > 0.5 else 0.0
+		var flap: float = sin(t * 5.5) * 0.55
+		draw_set_transform(wroot, wang - 1.1 + flap, Vector2(1.3, 1.3))
+		draw_texture(serp_wing, Vector2(-3, -20), body_mod)
+		draw_set_transform(wroot, wang + PI + 1.1 - flap, Vector2(1.3, -1.3))
+		draw_texture(serp_wing, Vector2(-3, -20), body_mod)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# body segments tail -> neck, scaled by taper
+	for i in range(n - 1, 0, -2):
+		var p: Vector2 = segs[i]
+		var pn: Vector2 = segs[maxi(0, i - 2)]
+		var seg_ang: float = (pn - p).angle() if pn.distance_to(p) > 0.3 else 0.0
+		var f := 1.0 - float(i) / n
+		var s := 0.55 + sin(f * PI) ** 0.8 * 0.75
+		draw_set_transform(p, seg_ang, Vector2(s, s))
+		draw_texture(serp_body, Vector2(-7, -9), body_mod)
+	# head
+	var hang := (aim - pos).angle()
+	var hflip: float = 1.0 if absf(angle_difference(hang, 0.0)) < PI * 0.5 else -1.0
+	draw_set_transform(pos, hang, Vector2(1.25, 1.25 * hflip))
+	draw_texture(serp_head, Vector2(-11, -10), body_mod)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if dive_t > 0.0:
+		for i in 5:
+			var tp := pos - dive_dir * (i * 10.0 + 10.0) + Vector2(randf_range(-4, 4), randf_range(-4, 4))
+			draw_line(tp, tp - dive_dir * 8.0, Color(1.8, 1.2, 0.4, 0.55 - i * 0.1), 2.0)
+	if glow:
+		draw_circle(pos, 14.0, Color(1.6, 1.1, 0.3, 0.12))
+	return
+	# ===== legacy polygon serpent (unused) =====
 	var emerald := Color(0.07, 0.32, 0.2)
 	var emerald_hi := Color(0.12, 0.5, 0.3)
 	var belly := Color(0.85, 0.68, 0.3)
