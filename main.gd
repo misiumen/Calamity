@@ -566,6 +566,15 @@ func _build_city() -> void:
 		if facades[j].get_height() > facades[big_i].get_height():
 			big_i = j
 	buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
+	# strategic landmarks — destroy them to bend the war
+	var candidates: Array = []
+	for bi in buildings.size() - 1:
+		if not buildings[bi].cit and buildings[bi].w > 40.0:
+			candidates.append(bi)
+	candidates.shuffle()
+	var specials := ["barracks", "comms", "fuel"]
+	for si in mini(3, candidates.size()):
+		buildings[candidates[si]].special = specials[si]
 	for b in buildings:
 		total_mass += b.maxhp
 	# destructible street furniture
@@ -704,7 +713,18 @@ func _process(delta: float) -> void:
 		lmb_prev = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		_people(delta)
 		_army(delta)
-		threat = min(100.0, threat + 0.22 * delta)
+		threat = min(100.0, threat + 0.22 * delta * threat_mult)
+		# evac buses run the gauntlet — mobile feasts
+		bus_cd -= delta
+		if bus_cd <= 0.0 and buses.size() < 2:
+			bus_cd = randf_range(18.0, 30.0)
+			var side: float = -1.0 if randf() < 0.5 else 1.0
+			buses.append({"x": cam.position.x - side * 500.0, "vx": side * 55.0, "hp": 3})
+		for bus in buses:
+			bus.x += bus.vx * delta
+			if absf(bus.x - cam.position.x) > 900.0:
+				bus.dead = true
+		buses = buses.filter(func(bus): return not bus.get("dead", false))
 		tier = mini(5, int(threat / 17.0))
 		_check_end()
 	for b in buildings:
@@ -862,6 +882,9 @@ var draft_open := false
 var draft_layer: CanvasLayer = null
 var pods: Array = []             # {b, p(local), t_left, tick}
 var rmb_cd := 0.0
+var threat_mult := 1.0
+var buses: Array = []            # evac buses {x, vx, hp}
+var bus_cd := 14.0
 var lash := {"t_left": 0.0, "ang": 0.0}
 var slams: Array = []            # {x, dir, dist}
 var aftershock_q: Array = []     # {p, t_left}
@@ -1792,9 +1815,47 @@ func _collapse(b: Dictionary) -> void:
 			_pop(Vector2(cx, -b.h - 16), "ATROCITY  — THREAT SURGES", Color(2.0, 0.4, 0.4))
 		"mall":
 			_sfx("glass")
+	match b.get("special", ""):
+		"barracks":
+			city_def = city_def.duplicate()
+			city_def.spawn_mult *= 0.55
+			_pop(Vector2(cx, -b.h - 26), "BARRACKS DESTROYED — reinforcements falter", Color(2.0, 0.9, 0.4))
+			score_f += 2000.0 * combo
+		"comms":
+			threat_mult = 0.5
+			_pop(Vector2(cx, -b.h - 26), "COMMS TOWER DOWN — the alarm slows", Color(0.5, 1.6, 2.0))
+			score_f += 2000.0 * combo
+		"fuel":
+			_pop(Vector2(cx, -b.h - 26), "FUEL DEPOT IGNITES", Color(2.2, 0.8, 0.2))
+			score_f += 1500.0 * combo
+			for i in 6:
+				var bp := Vector2(cx + randf_range(-70, 70), -randf_range(4, 40))
+				aftershock_q.append({"p": bp, "t_left": 0.15 + i * 0.18})
+				parts.append({"pos": bp, "vel": Vector2.ZERO, "life": 0.3, "col": Color(2.6, 1.6, 0.6), "flash": true, "size": 20.0})
+			for b2 in buildings:
+				if b2 != b and not b2.dead and absf(b2.x - b.x) < 130.0:
+					_ignite(b2, 3.0)
+			shake = 22.0
 	_sfx("crumble")
 
 func _hit_props(p: Vector2, r: float) -> void:
+	# evac buses — three hits of armor, a feast inside
+	for bus in buses:
+		if bus.get("dead", false) or absf(bus.x - p.x) > r + 14.0 or p.y < -22.0:
+			continue
+		bus.hp -= 1
+		_boom(Vector2(bus.x, -8), 6, Color(1.8, 1.4, 0.6), 70.0)
+		if bus.hp <= 0:
+			bus.dead = true
+			var gain := int(300.0 * combo * TIER_MULT[tier] * 2.0)
+			score_f += gain
+			bio += 12.0
+			meter = minf(100.0, meter + 10.0)
+			hp = minf(100.0, hp + 4.0)
+			for i in 8:
+				_mist(Vector2(bus.x + randf_range(-10, 10), -6))
+			_explode(Vector2(bus.x, -7), "car")
+			_pop(Vector2(bus.x, -22), "EVAC BUS DOWN  +%d" % gain, Color(1.9, 1.2, 0.5))
 	for pr in props:
 		if pr.dead or absf(pr.x - p.x) > r + 10.0 or p.y < -26.0:
 			continue
@@ -2666,6 +2727,25 @@ func _draw_building(b: Dictionary) -> void:
 		var cp := Vector2(b.x + b.w * 0.5, -b.cur_h - 8)
 		draw_circle(cp, 5, Color(2.0, 1.6, 0.5, 0.25))
 		draw_rect(Rect2(cp.x - 2, cp.y - 2, 4, 4), Color(2.2, 1.8, 0.6))
+	# landmark beacons — worth hunting
+	var spec: String = b.get("special", "")
+	if spec != "":
+		var mp2 := Vector2(b.x + b.w * 0.5, -b.cur_h - 12 + sin(t * 3.0) * 2.0)
+		var mcol: Color
+		var label: String
+		match spec:
+			"barracks":
+				mcol = Color(2.0, 0.9, 0.4)
+				label = "BARRACKS"
+			"comms":
+				mcol = Color(0.5, 1.6, 2.0)
+				label = "COMMS"
+			_:
+				mcol = Color(2.2, 0.8, 0.2)
+				label = "FUEL"
+		draw_colored_polygon(PackedVector2Array([mp2 + Vector2(0, -4), mp2 + Vector2(3, 0), mp2 + Vector2(0, 4), mp2 + Vector2(-3, 0)]), mcol)
+		draw_string(ThemeDB.fallback_font, mp2 + Vector2(0, -8), label, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
+			Color(mcol.r, mcol.g, mcol.b, 0.8))
 	if dmg > 0.05:
 		draw_rect(Rect2(b.x, -b.cur_h - 3, b.w * minf(1.0, dmg * 1.15), 2), Color(1.6, 0.4, 0.25, 0.9))
 
@@ -2699,6 +2779,18 @@ func _draw_street(left: float, right: float) -> void:
 			Vector2(l.x - 1, -24), Vector2(l.x + 2, -24), Vector2(l.x + 10, 0), Vector2(l.x - 9, 0)]),
 			Color(lamp_c.r * 0.55, lamp_c.g * 0.55, lamp_c.b * 0.55, 0.05))
 		draw_rect(Rect2(l.x - 9, -1, 19, 2), Color(lamp_c.r * 0.55, lamp_c.g * 0.55, lamp_c.b * 0.55, 0.09))
+	# evac buses
+	for bus in buses:
+		if bus.x < left - 30 or bus.x > right + 30:
+			continue
+		draw_rect(Rect2(bus.x - 14, -10, 28, 9), Color("#c8b45a"))
+		draw_rect(Rect2(bus.x - 12, -8, 24, 4), Color("#2a2418"))
+		for wx3 in 4:
+			draw_rect(Rect2(bus.x - 10 + wx3 * 6, -7.5, 4, 3), Color(0.9, 0.85, 0.6))
+		draw_rect(Rect2(bus.x - 12, -1, 4, 2), Color("#141210"))
+		draw_rect(Rect2(bus.x + 8, -1, 4, 2), Color("#141210"))
+		if bus.hp < 3:
+			draw_rect(Rect2(bus.x - 6, -10, 12, 3), Color(0.2, 0.1, 0.1, 0.6))
 	# cars — destructible
 	for c in cars:
 		if c.x < left or c.x > right:
