@@ -25,7 +25,11 @@ var picked_char := ""
 func _ready() -> void:
 	_build()
 
+var ui_font: FontFile
+
 func _build() -> void:
+	if ui_font == null:
+		ui_font = load("res://art/Silkscreen-Regular.ttf")
 	for c in get_children():
 		c.queue_free()
 	var bg := ColorRect.new()
@@ -37,6 +41,7 @@ func _build() -> void:
 	title.position = Vector2(0, 40)
 	title.size = Vector2(640, 40)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", load("res://art/Silkscreen-Bold.ttf"))
 	title.add_theme_font_size_override("font_size", 34)
 	title.add_theme_color_override("font_color", Color(1.8, 0.4, 0.45))
 	add_child(title)
@@ -65,6 +70,7 @@ func _rows(defs: Array, on_pick: Callable) -> void:
 		btn.text = d.name
 		btn.position = Vector2(190, 116 + i * 46)
 		btn.size = Vector2(260, 26)
+		btn.add_theme_font_override("font", ui_font)
 		btn.add_theme_font_size_override("font_size", 13)
 		if d.has("col"):
 			btn.add_theme_color_override("font_color", d.col)

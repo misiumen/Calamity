@@ -107,6 +107,15 @@ var tex_mid: Texture2D
 var cam: Camera2D
 var swarm_light: PointLight2D
 var hud := {}
+# --- premium juice ---
+var ui_font: FontFile
+var shown_score := 0.0
+var disp_hp := 100.0
+var combo_pulse := 0.0
+var prev_combo := 1.0
+var hitstop_until := 0
+var letterbox := 0.0
+var ambient: Array = []          # drifting embers/dust
 
 var _shot_frames := 0
 
@@ -320,6 +329,31 @@ func _setup_sfx() -> void:
 	sfx_bank["bell"] = _synth(1.8, 1.2, 190.0, 0.92)
 	sfx_bank["glass"] = _synth(0.3, 16.0, 2400.0, 0.25)
 
+func _synth_loop(dur: float) -> AudioStreamWAV:
+	# looped wind: heavy low-passed noise with a slow swell
+	var rate := 22050
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	var lp := 0.0
+	var lp2 := 0.0
+	for i in n:
+		var ts: float = float(i) / rate
+		var noise: float = randf() * 2.0 - 1.0
+		lp = lp * 0.96 + noise * 0.04
+		lp2 = lp2 * 0.99 + lp * 0.01
+		var swell: float = 0.6 + 0.4 * sin(TAU * ts / dur)   # loops seamlessly
+		var v := int(clampf(lp2 * swell * 3.0, -1.0, 1.0) * 22000.0)
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.data = data
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_end = n
+	return wav
+
 func _synth(dur: float, decay: float, tone_hz: float, tone_mix: float) -> AudioStreamWAV:
 	var rate := 22050
 	var n := int(dur * rate)
@@ -354,7 +388,33 @@ func _sfx(name: String) -> void:
 	p.pitch_scale = randf_range(0.88, 1.12)
 	p.play()
 
+func _hitstop(ms: int, scale: float) -> void:
+	Engine.time_scale = scale
+	hitstop_until = Time.get_ticks_msec() + ms
+
 func _setup_env() -> void:
+	ui_font = load("res://art/Silkscreen-Regular.ttf")
+	# post-process stack: vignette + grain + chromatic aberration
+	var post_layer := CanvasLayer.new()
+	post_layer.layer = 90
+	add_child(post_layer)
+	var post := ColorRect.new()
+	post.size = Vector2(640, 360)
+	post.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://post.gdshader")
+	post.material = mat
+	post_layer.add_child(post)
+	# wind ambience — a low loop, synthesized
+	var wind := AudioStreamPlayer.new()
+	wind.stream = _synth_loop(3.0)
+	wind.volume_db = -22.0
+	wind.autoplay = true
+	add_child(wind)
+	wind.play()
+	# drifting ash on the air
+	for i in 26:
+		ambient.append({"p": Vector2(randf_range(0, 640), randf_range(-340, -10)), "s": randf_range(0.3, 1.0)})
 	var we := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_CANVAS
@@ -799,6 +859,10 @@ func _process(delta: float) -> void:
 	# biomass threshold -> evolution draft (all calamities)
 	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
 		_open_draft()
+	# hit-stop release (real-time clock, immune to the frozen timescale)
+	if hitstop_until > 0 and Time.get_ticks_msec() > hitstop_until:
+		Engine.time_scale = 1.0
+		hitstop_until = 0
 	# dusk falls into night with time and violence; a devoured sun ends the argument
 	night_f = 1.0 if sun_eaten else clampf(maxf(t / 160.0, threat / 75.0) + 0.12, 0.12, 1.0)
 	if not over:
@@ -1899,6 +1963,7 @@ func _collapse(b: Dictionary) -> void:
 	if b.dying > 0.0 or b.dead:
 		return
 	b.dying = 0.6
+	_hitstop(300 if b.cit else 110, 0.15 if b.cit else 0.3)
 	var cx: float = b.x + b.w * 0.5
 	# heavy masonry flung out — physical chunks that bounce and crush
 	for i in 3 + int(b.w / 18.0):
@@ -2242,6 +2307,8 @@ func _kill_unit(u: Dictionary) -> void:
 	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0))
 	threat = minf(100.0, threat + 1.5)
 	shake = 10.0
+	if u.kind in ["tank", "heli", "jet", "arty"]:
+		_hitstop(60, 0.4)
 	_explode(u.pos + Vector2(0, -8), u.kind)
 	_pop(u.pos + Vector2(0, -20), "+%d" % gain, Color("#ffd75a"))
 
@@ -2518,6 +2585,20 @@ func _build_hud() -> void:
 	hud.hplbl = _label(layer, Vector2(478, 26), 8, Color("#9ab0d0"))
 	hud.hplbl.text = "INTEGRITY"
 	hud.hp = _bar(layer, Vector2(478, 38), Color("#e0455a"))
+	hud.hpchip = ColorRect.new()
+	hud.hpchip.color = Color(1, 1, 1, 0.85)
+	hud.hpchip.size = Vector2(0, 5)
+	hud.hp.get_parent().add_child(hud.hpchip)
+	# letterbox bars for the ending
+	hud.lb_top = ColorRect.new()
+	hud.lb_top.color = Color(0, 0, 0)
+	hud.lb_top.size = Vector2(640, 0)
+	layer.add_child(hud.lb_top)
+	hud.lb_bot = ColorRect.new()
+	hud.lb_bot.color = Color(0, 0, 0)
+	hud.lb_bot.position = Vector2(0, 360)
+	hud.lb_bot.size = Vector2(640, 0)
+	layer.add_child(hud.lb_bot)
 	hud.citylbl = _label(layer, Vector2(478, 48), 8, Color("#9ab0d0"))
 	hud.city = _bar(layer, Vector2(478, 60), Color("#9a5de0"))
 	hud.msg = _label(layer, Vector2(0, 140), 28, Color("#ffb08a"))
@@ -2542,6 +2623,7 @@ func _build_hud() -> void:
 func _label(parent: Node, p: Vector2, sz: int, col: Color) -> Label:
 	var l := Label.new()
 	l.position = p
+	l.add_theme_font_override("font", ui_font)
 	l.add_theme_font_size_override("font_size", sz)
 	l.add_theme_color_override("font_color", col)
 	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
@@ -2562,11 +2644,33 @@ func _bar(parent: Node, p: Vector2, col: Color) -> ColorRect:
 	return fg
 
 func _hud_update() -> void:
-	hud.score.text = _fmt(int(score_f))
+	# rolling score
+	shown_score = lerpf(shown_score, score_f, 0.12)
+	if score_f - shown_score < 2.0:
+		shown_score = score_f
+	hud.score.text = _fmt(int(shown_score))
+	# combo pulse on gain
+	if combo > prev_combo + 0.05:
+		combo_pulse = 1.0
+	prev_combo = combo
+	combo_pulse = maxf(0.0, combo_pulse - 0.08)
+	hud.combo.scale = Vector2.ONE * (1.0 + combo_pulse * 0.35)
 	hud.combo.text = "×%.1f" % combo
 	hud.tier.text = "THREAT — " + TIER_NAMES[tier]
 	hud.threat.size.x = 152.0 * threat / 100.0
+	# damage chip: white segment drains toward the real value
+	disp_hp = maxf(hp, disp_hp - 0.6)
+	if hp > disp_hp:
+		disp_hp = hp
+	hud.hpchip.position.x = 152.0 * maxf(0.0, hp) / 100.0
+	hud.hpchip.size.x = maxf(0.0, 152.0 * (disp_hp - maxf(0.0, hp)) / 100.0)
 	hud.hp.size.x = 152.0 * maxf(0.0, hp) / 100.0
+	# letterboxed endings
+	if over:
+		letterbox = minf(1.0, letterbox + 0.03)
+	hud.lb_top.size.y = 44.0 * letterbox
+	hud.lb_bot.position.y = 360.0 - 44.0 * letterbox
+	hud.lb_bot.size.y = 44.0 * letterbox
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
 	match character:
@@ -2663,8 +2767,18 @@ func _draw() -> void:
 		draw_circle(o.pos, rr * 0.5, Color(2.2, 2.4, 2.8))
 	for p in pops:
 		var a2: float = clampf(p.life, 0.0, 1.0)
-		draw_string(ThemeDB.fallback_font, p.pos, p.txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
+		draw_string(ui_font, p.pos, p.txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
 			Color(p.col.r * 1.4, p.col.g * 1.4, p.col.b * 1.4, a2))
+	# drifting ash on the wind
+	var ash_c: Color = city_def.lamp
+	for am in ambient:
+		am.p.y -= am.s * 0.9
+		am.p.x += sin(t * 0.8 + am.s * 20.0) * 0.3
+		if am.p.y < -350.0:
+			am.p.y = -5.0
+			am.p.x = randf_range(0, 680)
+		var wp := Vector2(left + fposmod(am.p.x, right - left), am.p.y)
+		draw_rect(Rect2(wp.x, wp.y, 1.2, 1.2), Color(ash_c.r * 0.5, ash_c.g * 0.45, ash_c.b * 0.4, 0.25 * am.s))
 	# atmosphere: ground haze + bottom vignette
 	draw_rect(Rect2(left, -30, right - left, 34), Color(0.3, 0.12, 0.3, 0.08))
 	draw_rect(Rect2(left, 14, right - left, 400), Color(0.01, 0.0, 0.03, 0.55))
@@ -2712,6 +2826,13 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 				var prog: float = 1.0 - devour_anim / 1.4
 				draw_circle(sun, sr * 1.15 * prog, Color(0.03, 0.01, 0.05))
 				draw_circle(sun, sr * 1.15 * prog + 2.0, Color(1.9, 1.2, 0.4, 0.5 * prog))
+	# slow clouds crossing the sky
+	for i in 3:
+		var cxx: float = left + fposmod(i * 251.0 + t * (3.0 + i), right - left + 160.0) - 80.0
+		var cyy: float = -300.0 + i * 44.0
+		for seg in 4:
+			draw_circle(Vector2(cxx + seg * 18.0, cyy + sin(seg * 1.7) * 3.0), 14.0 - seg * 2.0,
+				Color(0.06, 0.05, 0.1, 0.35))
 	# city aurora / smog signatures
 	if city_def.aurora:
 		for i in 3:
@@ -2856,7 +2977,7 @@ func _draw_building(b: Dictionary) -> void:
 				mcol = Color(2.2, 0.8, 0.2)
 				label = "FUEL"
 		draw_colored_polygon(PackedVector2Array([mp2 + Vector2(0, -4), mp2 + Vector2(3, 0), mp2 + Vector2(0, 4), mp2 + Vector2(-3, 0)]), mcol)
-		draw_string(ThemeDB.fallback_font, mp2 + Vector2(0, -8), label, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
+		draw_string(ui_font, mp2 + Vector2(0, -8), label, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
 			Color(mcol.r, mcol.g, mcol.b, 0.8))
 	if dmg > 0.05:
 		draw_rect(Rect2(b.x, -b.cur_h - 3, b.w * minf(1.0, dmg * 1.15), 2), Color(1.6, 0.4, 0.25, 0.9))
