@@ -186,12 +186,32 @@ func _carve(b: Dictionary, world: Vector2, r_px: float) -> void:
 
 # ================= update =================
 func _process(delta: float) -> void:
+	if draft_open:
+		return
 	t += delta
 	if OS.get_environment("CAL_SHOT") != "":
 		_shot_frames += 1
 		if _shot_frames == 130:
 			get_viewport().get_texture().get_image().save_png(OS.get_environment("CAL_SHOT"))
 			get_tree().quit()
+	# spore pods gnaw on their own
+	for pod in pods:
+		pod.t_left -= delta
+		pod.tick -= delta
+		var b: Dictionary = pod.b
+		if pod.tick <= 0.0 and not b.dead and b.dying <= 0.0:
+			pod.tick = 0.5
+			var world: Vector2 = Vector2(b.x, -b.h) + pod.p + Vector2(randf_range(-4, 4), randf_range(-4, 4))
+			_carve(b, world, randf_range(2.0, 4.0))
+			b.hp -= 2.0
+			score_f += 3.0 * combo * TIER_MULT[tier]
+			bio += 0.6
+			if b.hp <= 0.0:
+				b.dying = 0.6
+	pods = pods.filter(func(p): return p.t_left > 0.0 and not p.b.dead)
+	# biomass threshold -> evolution draft
+	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
+		_open_draft()
 	if not over:
 		_move(delta)
 		_tendrils(delta)
@@ -250,13 +270,20 @@ func _people(delta: float) -> void:
 		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, WORLD_W - 320)
 	people = people.filter(func(p): return not p.get("dead", false))
 
-# --- tendril state ---
+# --- tendril + evolution state ---
 const TENDRIL_RANGE := 100.0
+const BIO_THRESH := [60.0, 160.0, 300.0]
 var aim := Vector2.ZERO          # clamped world aim point
 var aim_clamped := false
 var feeding := false             # LMB held
 var chew_target = null           # building dict or null
 var chewing := false             # actually biting something this frame
+var evo := {"ironmaw": 0, "gorehook": 0, "spore": 0}
+var bio := 0.0
+var bio_stage := 0
+var draft_open := false
+var draft_layer: CanvasLayer = null
+var pods: Array = []             # {b, p(local), t_left, tick}
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
@@ -267,17 +294,28 @@ func _tendrils(delta: float) -> void:
 	feeding = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not over
 	chewing = false
 	chew_target = null
-	if feeding:
+	# gorehook grapple: RMB pulls YOU toward the aim point
+	if evo.gorehook > 0 and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		vel += (aim - pos).normalized() * 2000.0 * delta
+	if not feeding:
+		# release: drop everything held (falls, fall damage)
+		for u in units:
+			if u.get("grab", false):
+				u.grab = false
+				u.fall = true
+				u.vy = 0.0
+	else:
 		# 1) grab a unit near the aim point
 		var grabbed_someone := false
 		for u in units:
 			if u.get("grab", false):
+				grabbed_someone = true
 				continue
 			if (u.pos + Vector2(0, -8)).distance_to(aim) < 17.0:
 				u.grab = true
+				u.fall = false
 				combo_idle = 0.0
 				grabbed_someone = true
-				break
 		# 2) snatch a person
 		if not grabbed_someone:
 			for p in people:
@@ -285,6 +323,7 @@ func _tendrils(delta: float) -> void:
 					p.dead = true
 					var gain := int(20.0 * combo * TIER_MULT[tier])
 					score_f += gain
+					bio += 2.0
 					combo = minf(9.5, combo + 0.12)
 					combo_idle = 0.0
 					hp = minf(100.0, hp + 0.8)
@@ -302,12 +341,46 @@ func _tendrils(delta: float) -> void:
 				chewing = true
 				_chew(b, delta)
 				break
-	# reel grabbed units in
+	# reel grabbed units in — smashing through buildings on the way
 	for u in units:
+		if u.get("fall", false):
+			u.vy += 300.0 * delta
+			u.pos.y += u.vy * delta
+			if u.kind == "heli":
+				u.fall = false   # helis recover in the air
+				u.vy = 0.0
+			elif u.pos.y >= 0.0:
+				u.pos.y = 0.0
+				u.fall = false
+				if u.vy > 130.0:
+					u.dead = true
+					_kill_unit(u)
+				u.vy = 0.0
 		if not u.get("grab", false):
 			continue
-		var reel: float = 60.0 if u.kind == "tank" else 110.0
-		u.pos = u.pos.move_toward(pos, reel * delta)
+		var reel: float = (60.0 if u.kind == "tank" else 110.0) * (2.2 if evo.gorehook > 0 else 1.0)
+		u.crash_cd = maxf(0.0, u.get("crash_cd", 0.0) - delta)
+		# collide with buildings along the reel path
+		var blocked := false
+		for b in buildings:
+			if b.dead or b.dying > 0.0:
+				continue
+			var upos: Vector2 = u.pos + Vector2(0, -8)
+			if upos.x >= b.x and upos.x <= b.x + b.w and upos.y >= -b.cur_h and upos.y <= 0.0:
+				blocked = true
+				if u.crash_cd <= 0.0:
+					u.crash_cd = 0.08
+					_carve(b, upos, 8.0)
+					b.hp -= 4.0
+					b.holes.append({"p": upos - Vector2(b.x, -b.h), "o": randf() * TAU})
+					_chunks(upos, 3)
+					_boom(upos, 4, Color("#7a6a7a"), 80.0)
+					shake = maxf(shake, 3.0)
+					score_f += 6.0 * combo * TIER_MULT[tier]
+					if b.hp <= 0.0:
+						b.dying = 0.6
+				break
+		u.pos = u.pos.move_toward(pos, reel * delta * (0.45 if blocked else 1.0))
 		if u.pos.distance_to(pos) < radius + 2.0:
 			u.dead = true
 			_kill_unit(u)
@@ -318,19 +391,34 @@ func _tendrils(delta: float) -> void:
 			combo = max(1.0, combo - 1.6 * delta)
 
 func _chew(b: Dictionary, delta: float) -> void:
-	var bite: float = (7.0 + combo * 2.4) * delta * (1.0 + tier * 0.15)
+	var maul: bool = evo.ironmaw > 0
+	var bite: float = (11.0 + combo * 3.2) * delta * (1.0 + tier * 0.15) * (1.8 if maul else 1.0)
 	b.hp -= bite
 	threat = min(100.0, threat + bite * 0.06)
 	combo_idle = 0.0
 	score_f += bite * 1.6 * combo * TIER_MULT[tier]
+	bio += bite * 0.5
 	if bite_cd <= 0.0:
-		bite_cd = 0.13
+		bite_cd = 0.22 if maul else 0.13
 		combo = min(9.5, combo + 0.06)
-		_carve(b, aim, randf_range(4.0, 8.0))
-		_carve(b, aim + Vector2(randf_range(-5, 5), randf_range(-5, 5)), randf_range(2.5, 5.0))
+		var r1: float = randf_range(4.0, 8.0) * (2.0 if maul else 1.0)
+		_carve(b, aim, r1)
+		_carve(b, aim + Vector2(randf_range(-5, 5), randf_range(-5, 5)), r1 * 0.6)
 		b.holes.append({"p": aim - Vector2(b.x, -b.h), "o": randf() * TAU})
-		_boom(aim, 3, Color("#7a6a7a"), 70.0)
-		_chunks(aim, 2)
+		_boom(aim, 5 if maul else 3, Color("#7a6a7a"), 90.0 if maul else 70.0)
+		_chunks(aim, 4 if maul else 2)
+		if maul:
+			shake = maxf(shake, 4.0)
+			# shockwave: hurt units near the smash point
+			for u in units:
+				if (u.pos + Vector2(0, -8)).distance_to(aim) < 30.0:
+					u.hp = u.get("hp", 1) - 1
+					_boom(u.pos + Vector2(0, -8), 6, Color(2.2, 1.2, 0.5), 80.0)
+					if u.hp <= 0:
+						u.dead = true
+						_kill_unit(u)
+		if evo.spore > 0 and int(t * 7.7) % 4 == 0:
+			pods.append({"b": b, "p": aim - Vector2(b.x, -b.h), "t_left": 6.0, "tick": 0.5})
 		if int(t * 7.7) % 3 == 0:
 			_pop(aim + Vector2(0, -10), "+%d" % int(bite * 1.6 * combo * TIER_MULT[tier] * 8.0), Color("#ffcf8a"))
 	if b.hp <= 0.0:
@@ -344,6 +432,48 @@ func _chew(b: Dictionary, delta: float) -> void:
 		_pop(Vector2(b.x + b.w * 0.5, -b.h - 14), ("CITADEL FELL  +" if b.cit else "+") + _fmt(gain),
 			Color("#ffd75a") if b.cit else Color("#ffb08a"))
 
+const DRAFT_DEFS := [
+	{"id": "ironmaw", "name": "IRONMAW", "desc": "tendrils grow chitin mauls — heavier, wider smashes; shockwaves crush nearby units"},
+	{"id": "gorehook", "name": "GOREHOOK", "desc": "barbed hooks — reel everything twice as fast; RMB grapples YOU toward the cursor"},
+	{"id": "spore", "name": "SPORE BLOOM", "desc": "plant pods in wounds — they keep gnawing the building on their own"},
+]
+
+func _open_draft() -> void:
+	draft_open = true
+	draft_layer = CanvasLayer.new()
+	add_child(draft_layer)
+	var dim := ColorRect.new()
+	dim.size = Vector2(640, 360)
+	dim.color = Color(0.02, 0.0, 0.05, 0.75)
+	draft_layer.add_child(dim)
+	var title := _label(draft_layer, Vector2(0, 60), 20, Color("#ff4d78"))
+	title.text = "THE SWARM EVOLVES — choose"
+	title.size = Vector2(640, 30)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	for i in DRAFT_DEFS.size():
+		var d: Dictionary = DRAFT_DEFS[i]
+		var btn := Button.new()
+		var lvl: int = evo[d.id]
+		btn.text = d.name + ("  [tier %d]" % (lvl + 1))
+		btn.position = Vector2(70, 110 + i * 62)
+		btn.size = Vector2(500, 30)
+		btn.add_theme_font_size_override("font_size", 13)
+		btn.pressed.connect(_pick_draft.bind(d.id))
+		draft_layer.add_child(btn)
+		var desc := _label(draft_layer, Vector2(78, 140 + i * 62), 9, Color("#c8d0e8"))
+		desc.text = d.desc
+	get_viewport().set_input_as_handled()
+
+func _pick_draft(id: String) -> void:
+	evo[id] += 1
+	bio_stage += 1
+	draft_open = false
+	if draft_layer:
+		draft_layer.queue_free()
+		draft_layer = null
+	_pop(pos + Vector2(0, -24), DRAFT_DEFS.filter(func(d): return d.id == id)[0].name, Color(2.0, 0.6, 0.7))
+	radius = minf(24.0, radius + 2.0)  # visible growth per evolution
+
 func _kill_unit(u: Dictionary) -> void:
 	var base: int
 	match u.kind:
@@ -352,6 +482,7 @@ func _kill_unit(u: Dictionary) -> void:
 		_: base = 300
 	var gain := int(base * combo * TIER_MULT[tier])
 	score_f += gain
+	bio += 20.0 if u.kind == "tank" else 12.0
 	combo = minf(9.5, combo + 0.3)
 	combo_idle = 0.0
 	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0))
@@ -394,11 +525,11 @@ func _army(delta: float) -> void:
 		var x: float = pos.x + side * randf_range(360, 560)
 		if x > 30 and x < WORLD_W - 30:
 			if tier >= 4 and randf() < 0.45:
-				units.append({"kind": "heli", "pos": Vector2(x, randf_range(-220, -150)), "cd": randf_range(0.5, 1.2)})
+				units.append({"kind": "heli", "pos": Vector2(x, randf_range(-220, -150)), "cd": randf_range(0.5, 1.2), "hp": 2})
 			elif tier >= 3 and randf() < 0.6:
-				units.append({"kind": "tank", "pos": Vector2(x, 0), "cd": randf_range(0.7, 1.5)})
+				units.append({"kind": "tank", "pos": Vector2(x, 0), "cd": randf_range(0.7, 1.5), "hp": 3})
 			else:
-				units.append({"kind": "police", "pos": Vector2(x, 0), "cd": randf_range(0.6, 1.2)})
+				units.append({"kind": "police", "pos": Vector2(x, 0), "cd": randf_range(0.6, 1.2), "hp": 1})
 	for u in units:
 		if u.get("grab", false):
 			continue
@@ -482,6 +613,9 @@ func _build_hud() -> void:
 	add_child(layer)
 	hud.score = _label(layer, Vector2(10, 4), 16, Color("#e8f0ff"))
 	hud.combo = _label(layer, Vector2(10, 24), 11, Color("#ff4d78"))
+	hud.biolbl = _label(layer, Vector2(10, 40), 8, Color("#8ad08a"))
+	hud.biolbl.text = "BIOMASS"
+	hud.bio = _bar(layer, Vector2(10, 52), Color("#5ad06a"))
 	hud.tier = _label(layer, Vector2(478, 4), 8, Color("#9ab0d0"))
 	hud.threat = _bar(layer, Vector2(478, 16), Color("#e08a2b"))
 	hud.hplbl = _label(layer, Vector2(478, 26), 8, Color("#9ab0d0"))
@@ -528,6 +662,12 @@ func _hud_update() -> void:
 	hud.hp.size.x = 152.0 * maxf(0.0, hp) / 100.0
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
+	if bio_stage >= BIO_THRESH.size():
+		hud.bio.size.x = 152.0
+		hud.biolbl.text = "BIOMASS — MAX"
+	else:
+		var lo: float = 0.0 if bio_stage == 0 else BIO_THRESH[bio_stage - 1]
+		hud.bio.size.x = 152.0 * clampf((bio - lo) / (BIO_THRESH[bio_stage] - lo), 0.0, 1.0)
 
 # ================= render =================
 func _draw() -> void:
@@ -623,6 +763,16 @@ func _draw_building(b: Dictionary) -> void:
 	var vis_frac: float = b.cur_h / b.h
 	var src := Rect2(0, img_h * (1.0 - vis_frac), b.img.get_width(), img_h * vis_frac)
 	draw_texture_rect_region(b.tex, Rect2(b.x, -b.cur_h, b.w, b.cur_h), src)
+	# spore pods pulsing in wounds
+	for pod in pods:
+		if pod.b == b:
+			var pp: Vector2 = Vector2(b.x, -b.h) + pod.p
+			if pp.y <= -b.cur_h:
+				continue
+			var pulse: float = 2.2 + sin(t * 6.0) * 0.8
+			draw_circle(pp, pulse + 1.5, Color(0.4, 0.9, 0.3, 0.25))
+			draw_circle(pp, pulse, Color(0.9, 1.6, 0.4))
+			draw_circle(pp, pulse * 0.5, Color(1.8, 0.6, 0.5))
 	# embers glowing in fresh holes (HDR)
 	for hole in b.holes:
 		if randf() < 0.5:
@@ -753,8 +903,18 @@ func _draw_tendrils() -> void:
 			draw_line(prev, pt, Color(0.35, 0.05, 0.1), thick + 1.0)
 			draw_line(prev, pt, Color(0.9, 0.15, 0.2), thick)
 			prev = pt
-		# bright HDR tip
-		draw_circle(prev, 1.8, Color(2.0, 0.5, 0.45))
+		# branch-specific tips
+		if evo.ironmaw > 0:
+			draw_circle(prev, 3.6, Color("#2a1420"))
+			draw_circle(prev + Vector2(-1, -1), 2.4, Color("#4a2430"))
+			draw_circle(prev, 1.2, Color(1.8, 0.5, 0.4))
+		elif evo.gorehook > 0:
+			var dirv := (prev - pos).normalized()
+			draw_line(prev, prev + dirv.rotated(2.6) * 5.0, Color(1.6, 0.9, 0.8), 1.4)
+			draw_line(prev, prev + dirv.rotated(-2.6) * 5.0, Color(1.6, 0.9, 0.8), 1.4)
+			draw_circle(prev, 1.4, Color(2.0, 0.5, 0.45))
+		else:
+			draw_circle(prev, 1.8, Color(2.0, 0.5, 0.45))
 		if chewing and randf() < 0.4:
 			draw_circle(prev, 3.2, Color(1.8, 0.6, 0.4, 0.5))
 
