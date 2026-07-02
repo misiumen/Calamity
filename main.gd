@@ -1886,8 +1886,10 @@ func _hud_update() -> void:
 # ================= render =================
 func _draw() -> void:
 	var cx := cam.position.x
-	var left := cx - 340.0
-	var right := cx + 340.0
+	# view half-width depends on camera zoom (keraunos 0.55 sees ~620px) + shake margin
+	var half: float = 330.0 / cam.zoom.x + 24.0
+	var left := cx - half
+	var right := cx + half
 	_draw_sky(left, right, cx)
 	_draw_backdrop(left, right, cx)
 	for b in buildings:
@@ -1898,7 +1900,7 @@ func _draw() -> void:
 	# eclipse gloom sits UNDER the living things — fires, beasts and armies stay vivid
 	var dark_a: float = maxf(clampf(blackout_t / 1.5, 0.0, 1.0) * 0.5, (0.3 if sun_eaten else 0.0))
 	if dark_a > 0.0:
-		draw_rect(Rect2(left, -380, right - left, 780), Color(0.01, 0.0, 0.03, dark_a))
+		draw_rect(Rect2(left, -540, right - left, 940), Color(0.01, 0.0, 0.03, dark_a))
 		if blackout_t > 0.0:
 			var moon2 := Vector2(cam.position.x + 140, -250.0)
 			draw_circle(moon2, city_def.moon_r + 4.0, Color(0.02, 0.0, 0.03))
@@ -1935,8 +1937,8 @@ const DUSK_SKY := [Color("#3a2a50"), Color("#7a3a50"), Color("#c05a3c"), Color("
 
 func _draw_sky(left: float, right: float, cx: float) -> void:
 	var g: Array = city_def.sky
-	var top := -380.0
-	var rows := 95
+	var top := -540.0
+	var rows := 108
 	for i in rows:
 		var f := float(i) / rows
 		var col: Color
@@ -1953,13 +1955,13 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 		else:
 			col = g[3].lerp(g[4], (f - 0.88) / 0.12)
 			dcol = DUSK_SKY[3].lerp(DUSK_SKY[4], (f - 0.88) / 0.12)
-		draw_rect(Rect2(left, top + f * 380.0, right - left, 380.0 / rows + 1), dcol.lerp(col, night_f))
+		draw_rect(Rect2(left, top + f * 540.0, right - left, 540.0 / rows + 1), dcol.lerp(col, night_f))
 	for i in 60:
 		var sxr := fmod(_hash(i * 3.7) * 4310.0, 1.0) * (right - left) + left
-		var syr := -378.0 + _hash(i * 9.1) * 190.0
+		var syr := -535.0 + _hash(i * 9.1) * 300.0
 		if fmod(t * (0.4 + fmod(float(i), 3.0) * 0.3) + i, 2.0) < 1.5:
 			draw_rect(Rect2(sxr, syr, 1, 1),
-				Color(0.9, 0.92, 1.0, 0.5 * night_f * (1.0 - (syr + 378.0) / 200.0)))
+				Color(0.9, 0.92, 1.0, 0.5 * night_f * (1.0 - (syr + 535.0) / 320.0)))
 	# THE SUN — low, dying, and edible
 	if not sun_eaten or devour_anim > 0.0:
 		var sun := Vector2(cx - 150, lerpf(-190.0, 25.0, clampf(night_f / 0.92, 0.0, 1.0)))
