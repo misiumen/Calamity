@@ -131,27 +131,34 @@ func _ready() -> void:
 func _bake_serpent() -> void:
 	# hand-baked pixel sprites, drawn once — outline + shading like real sheet art
 	var OUT := Color("#120810")
-	var EM1 := Color("#1e5c3a")   # emerald dark
-	var EM2 := Color("#2e8a52")   # emerald
-	var EM3 := Color("#4ec072")   # emerald light
-	var GLD := Color("#e8b040")   # gold
-	var GLD2 := Color("#f8dc80")
-	var RED := Color("#d84830")
+	var EM1 := Color("#0e4a4e")   # deep turquoise (aztec jade)
+	var EM2 := Color("#1a7a78")   # turquoise
+	var EM3 := Color("#3ab8a8")   # bright turquoise
+	var GLD := Color("#c86428")   # terracotta
+	var GLD2 := Color("#f0e6d0")  # bone white
+	var RED := Color("#c02818")   # sacrificial red
 	# --- head 26x20, faces +X ---
 	var h := Image.create(26, 20, false, Image.FORMAT_RGBA8)
 	for px in [[4,8,16,8,EM2],[6,7,14,4,EM3],[4,12,14,4,EM1],[16,9,7,3,EM2],[20,10,4,2,EM1],
 			[6,6,10,2,EM3],[8,14,8,3,GLD],[10,16,6,2,GLD2]]:
 		h.fill_rect(Rect2i(px[0], px[1], px[2], px[3]), px[4])
-	# jaw fangs
-	h.fill_rect(Rect2i(21, 12, 3, 1), GLD2)
-	h.set_pixel(22, 13, GLD2)
+	# bone fang mask ringing the jaw — the aztec serpent's teeth
+	h.fill_rect(Rect2i(17, 12, 7, 2), GLD2)
+	for fx2 in [17, 19, 21, 23]:
+		h.set_pixel(fx2, 14, GLD2)
+	h.fill_rect(Rect2i(19, 5, 4, 1), GLD2)   # brow bone
+	# turquoise mosaic glints
+	h.set_pixel(9, 9, EM3)
+	h.set_pixel(12, 11, EM3)
+	h.set_pixel(7, 12, EM3)
 	# eye
 	h.fill_rect(Rect2i(14, 9, 3, 3), OUT)
 	h.fill_rect(Rect2i(15, 10, 2, 1), Color(2.4, 1.5, 0.3))
-	# crest feathers sweeping back
-	for c in [[2,2,RED],[0,5,GLD],[1,0,RED],[4,4,GLD]]:
-		h.fill_rect(Rect2i(c[0], c[1], 5, 2), c[2])
-		h.fill_rect(Rect2i(c[0] + 1, c[1] + 1, 4, 1), Color(c[2].r * 1.3, c[2].g * 1.3, c[2].b * 1.3))
+	# THE RUFF — radial feather collar behind the skull, Quetzalcoatl's crown
+	for c in [[0, 0, 7, 2], [0, 3, 8, 2], [0, 6, 6, 2], [0, 16, 7, 2], [1, 18, 6, 2], [0, 12, 5, 2]]:
+		h.fill_rect(Rect2i(c[0], c[1], c[2], c[3]), RED)
+		h.fill_rect(Rect2i(c[0], c[1], c[2] - 2, 1), Color(1.3, 0.35, 0.2))
+		h.set_pixel(c[0] + c[2] - 1, c[1], EM3)   # turquoise tips
 	_outline(h, OUT)
 	serp_head = ImageTexture.create_from_image(h)
 	# --- body segment 14x16, plume on top ---
@@ -159,11 +166,15 @@ func _bake_serpent() -> void:
 	b.fill_rect(Rect2i(2, 6, 10, 7), EM2)
 	b.fill_rect(Rect2i(3, 6, 8, 2), EM3)
 	b.fill_rect(Rect2i(2, 11, 10, 2), EM1)
-	b.fill_rect(Rect2i(3, 13, 8, 2), GLD)     # belly
-	# dorsal plume
+	b.fill_rect(Rect2i(3, 13, 8, 2), GLD2)    # bone belly scutes
+	b.set_pixel(5, 13, GLD)
+	b.set_pixel(9, 13, GLD)
+	# dorsal plume — red feathers, turquoise tips
 	b.fill_rect(Rect2i(5, 1, 2, 5), RED)
-	b.fill_rect(Rect2i(8, 2, 2, 4), GLD)
-	b.fill_rect(Rect2i(3, 3, 2, 3), RED)
+	b.set_pixel(5, 1, EM3)
+	b.fill_rect(Rect2i(8, 2, 2, 4), RED)
+	b.set_pixel(8, 2, EM3)
+	b.fill_rect(Rect2i(3, 3, 2, 3), GLD)
 	_outline(b, OUT)
 	serp_body = ImageTexture.create_from_image(b)
 	# --- wing 30x22, root at bottom-left ---
@@ -534,7 +545,12 @@ func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "to
 func _hash(n: float) -> float:
 	return fmod(absf(sin(n * 127.1) * 43758.55), 1.0)
 
+const MAX_PARTS := 900
+const MAX_HOLES := 44
+
 func _carve(b: Dictionary, world: Vector2, r_px: float) -> void:
+	if b.holes.size() > MAX_HOLES:
+		b.holes = b.holes.slice(b.holes.size() - MAX_HOLES)
 	var ix := int((world.x - b.x) / b.sc)
 	var iy := int((world.y + b.h) / b.sc)
 	var r := int(r_px / b.sc)
@@ -583,11 +599,13 @@ func _process(delta: float) -> void:
 			bio += 0.6
 			if b.hp <= 0.0:
 				_collapse(b)
+	var spawn_pods: Array = []
 	for pod in pods:
 		if pod.t_left <= 0.0 and nodes.has("creep") and randf() < 0.25 and not pod.b.dead:
-			pods.append({"b": pod.b, "p": pod.p + Vector2(randf_range(-14, 14), randf_range(-14, 14)),
+			spawn_pods.append({"b": pod.b, "p": pod.p + Vector2(randf_range(-14, 14), randf_range(-14, 14)),
 				"t_left": 6.0, "tick": 0.5})
 	pods = pods.filter(func(p): return p.t_left > 0.0 and not p.b.dead)
+	pods.append_array(spawn_pods)
 	# biomass threshold -> evolution draft (all calamities)
 	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
 		_open_draft()
@@ -611,6 +629,8 @@ func _process(delta: float) -> void:
 		tier = mini(5, int(threat / 17.0))
 		_check_end()
 	for b in buildings:
+		if b.holes.size() > 40:
+			b.holes = b.holes.slice(b.holes.size() - 40)
 		if b.dying > 0.0 and not b.dead:
 			b.dying -= delta
 			b.cur_h = maxf(b.h * 0.06, b.cur_h - b.h * 2.2 * delta)
@@ -628,12 +648,29 @@ func _process(delta: float) -> void:
 				_carve(b, Vector2(b.x + randf_range(4, b.w - 4), -randf_range(6, b.cur_h - 6)), 3.0)
 			if b.hp <= 0.0:
 				_collapse(b)
+	if parts.size() > MAX_PARTS:
+		parts = parts.slice(parts.size() - MAX_PARTS)
 	for p in parts:
 		p.pos += p.vel * delta
 		if not p.get("fire", false):
 			p.vel.y += 300.0 * delta
 		p.life -= delta
+		# debris chunks bounce off the street
+		if p.get("chunk", false) and p.pos.y >= -1.0 and p.vel.y > 0.0:
+			p.pos.y = -1.0
+			p.vel.y *= -0.45
+			p.vel.x *= 0.7
+			if absf(p.vel.y) > 40.0:
+				for u in units:
+					if not u.get("dead", false) and absf(u.pos.x - p.pos.x) < 8.0 and u.kind != "heli" and u.kind != "jet":
+						u.hp = u.get("hp", 1) - 1
+						if u.hp <= 0:
+							u.dead = true
+							_kill_unit(u)
 	parts = parts.filter(func(p): return p.life > 0.0)
+	units = units.filter(func(u): return not u.get("dead", false))
+	if parts.size() > 1600:
+		parts = parts.slice(parts.size() - 1600)
 	for p in pops:
 		p.pos.y -= 18.0 * delta
 		p.life -= delta
@@ -748,6 +785,7 @@ var devour_anim := 0.0
 var eclipse_len := 10.0          # length of the blackout shock (SUN-EATER: 16)
 var eclipse_cost := 80.0
 var pierced_this_dive := 0
+var pierce_id := 0
 var feathers: Array = []         # {pos, vy, t_left}
 # sfx
 var sfx_players: Array = []
@@ -828,6 +866,20 @@ func _tendrils(delta: float) -> void:
 				grabbed_someone = true
 				grabbed_n += 1
 				_sfx("grab")
+		# 1b) rip parked cars off the street — they become wrecking mass
+		if grabbed_n < max_grabs:
+			for c in cars:
+				if c.get("gone", false) or c.dead:
+					continue
+				if Vector2(c.x + c.w * 0.5, -5).distance_to(aim) < 15.0:
+					c.gone = true
+					c.dead = true
+					units.append({"kind": "carcass", "pos": Vector2(c.x + c.w * 0.5, -5), "cd": 1e9,
+						"hp": 1, "grab": true, "col": c.col, "w": c.w})
+					grabbed_someone = true
+					grabbed_n += 1
+					_sfx("grab")
+					break
 		# 2) snatch a person
 		if not grabbed_someone:
 			for p in people:
@@ -1130,7 +1182,7 @@ func _tzitzi(delta: float) -> void:
 						u.dead = true
 						_kill_unit(u)
 			units = units.filter(func(u): return not u.get("dead", false))
-		if nodes.has("rain") and blackout_t > 0.0 and randf() < 6.0 * delta:
+		if nodes.has("rain") and blackout_t > 0.0 and feathers.size() < 60 and randf() < 6.0 * delta:
 			feathers.append({"pos": Vector2(cam.position.x + randf_range(-320, 320), -randf_range(200, 340)),
 				"vy": randf_range(40, 90), "t_left": 6.0})
 	# feathers fall and cut
@@ -1152,13 +1204,14 @@ func _tzitzi(delta: float) -> void:
 	feathers = feathers.filter(func(f2): return f2.t_left > 0.0)
 	units = units.filter(func(u): return not u.get("dead", false))
 	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	var cd_base: float = 0.55 * (0.6 if nodes.has("serration") else 1.0)
+	var cd_base: float = 0.72 * (0.6 if nodes.has("serration") else 1.0)
 	var cd_needed: float = cd_base * (0.5 if (blackout_t > 0.0 or sun_eaten) else 1.0)
 	if lmb and not lmb_prev and dive_cd <= 0.0:
 		dive_cd = cd_needed
 		dive_t = 0.22
 		dive_dir = (get_global_mouse_position() - pos).normalized()
 		pierced_this_dive = 0
+		pierce_id += 1
 		combo_idle = 0.0
 		_sfx("lash")
 		if branch == "feather":
@@ -1180,23 +1233,26 @@ func _tzitzi(delta: float) -> void:
 	# diving: pierce everything on the path
 	if dive_t > 0.0:
 		var mult: float = 1.6 if blackout_t > 0.0 else (1.3 if sun_eaten else 1.0)
-		mult *= 1.0 + 0.15 * pierced_this_dive   # chain bonus per building pierced
+		mult *= 1.0 + minf(0.6, 0.1 * pierced_this_dive)   # chain bonus, capped
 		var carve_r: float = 10.0 if branch == "obsidian" else 7.0
 		for b in buildings:
 			if b.dead or b.dying > 0.0:
 				continue
 			if pos.x >= b.x and pos.x <= b.x + b.w and pos.y >= -b.cur_h and pos.y <= 0.0:
-				if not b.get("pierced_mark", 0.0) == t:
-					b.pierced_mark = t
+				if b.get("pierce_id", 0) != pierce_id:
+					b.pierce_id = pierce_id
 					pierced_this_dive += 1
+				if b.get("carve_at", 0.0) > t:   # per-tick carving, not per-frame
+					continue
+				b.carve_at = t + 0.07
 				_carve(b, pos, carve_r)
-				b.hp -= 5.5 * mult
+				b.hp -= 3.4 * mult
 				if nodes.has("cleave"):
 					_ignite(b, 1.2 * delta * 3.0)
-				var gain: float = 8.0 * combo * TIER_MULT[tier] * mult
+				var gain: float = 5.0 * combo * TIER_MULT[tier] * mult
 				score_f += gain
-				bio += 1.4
-				meter = minf(100.0, meter + 1.6)
+				bio += 0.9
+				meter = minf(100.0, meter + 1.0)
 				combo = minf(9.5, combo + 0.02)
 				if randf() < 0.3:
 					b.holes.append({"p": pos - Vector2(b.x, -b.h), "o": randf() * TAU})
@@ -1250,6 +1306,17 @@ func _unit_crash_buildings(u: Dictionary, dmg: float) -> bool:
 	return false
 
 func _rmb_active() -> void:
+	# holding something? base instinct: THROW it at the cursor (Sling node does it harder)
+	if not nodes.has("sling"):
+		for u in units:
+			if u.get("grab", false):
+				u.grab = false
+				u.thrown = true
+				u.tvel = (aim - u.pos).normalized() * 250.0
+				rmb_cd = 0.8
+				shake = 4.0
+				_sfx("lash")
+				return
 	if nodes.has("seismic"):
 		rmb_cd = 2.5
 		shake = 10.0
@@ -1355,6 +1422,11 @@ func _collapse(b: Dictionary) -> void:
 		return
 	b.dying = 0.6
 	var cx: float = b.x + b.w * 0.5
+	# heavy masonry flung out — physical chunks that bounce and crush
+	for i in 3 + int(b.w / 18.0):
+		parts.append({"pos": Vector2(b.x + randf() * b.w, -b.cur_h * randf_range(0.3, 0.9)),
+			"vel": Vector2(randf_range(-90, 90), randf_range(-60, 10)),
+			"life": randf_range(1.2, 2.4), "col": Color("#3a2c3a"), "size": randf_range(3.5, 6.0), "chunk": true})
 	# dust wave rolling out from the base
 	for side in [-1.0, 1.0]:
 		for i in 7:
@@ -1604,6 +1676,7 @@ func _kill_unit(u: Dictionary) -> void:
 		"arty": base = 900
 		"jet": base = 1200
 		"soldier": base = 120
+		"carcass": base = 150
 		_: base = 300
 	var gain := int(base * combo * TIER_MULT[tier])
 	score_f += gain
@@ -1640,8 +1713,8 @@ func _mist(p: Vector2) -> void:
 
 func _chunks(p: Vector2, n: int) -> void:
 	for i in n:
-		parts.append({"pos": p, "vel": Vector2(randf_range(-40, 40), randf_range(-60, -10)),
-			"life": randf_range(0.5, 1.1), "col": Color("#4a3a4a"), "size": randf_range(2.5, 4.0)})
+		parts.append({"pos": p, "vel": Vector2(randf_range(-50, 50), randf_range(-80, -10)),
+			"life": randf_range(0.9, 1.9), "col": Color("#4a3a4a"), "size": randf_range(2.5, 4.5), "chunk": true})
 
 func _army(delta: float) -> void:
 	var defense: float = city_def.defense
@@ -1669,7 +1742,7 @@ func _army(delta: float) -> void:
 			else:
 				units.append({"kind": "police", "pos": Vector2(x, 0), "cd": randf_range(0.6, 1.2), "hp": 1})
 	for u in units:
-		if u.get("grab", false) or u.get("thrown", false):
+		if u.get("grab", false) or u.get("thrown", false) or u.kind == "carcass":
 			continue
 		if stun_t > 0.0 and u.kind != "jet":
 			continue
@@ -2235,6 +2308,11 @@ func _draw_actors() -> void:
 				draw_colored_polygon(PackedVector2Array([p + Vector2(0, 0), p + Vector2(-jd * 6, -7), p + Vector2(-jd * 2, 0)]),
 					Color("#2c3238"))
 				draw_line(p + Vector2(-jd * 8, 0), p + Vector2(-jd * 20, 0), Color(1.6, 1.2, 0.6, 0.5), 2)
+			"carcass":
+				var cw: float = u.get("w", 16.0)
+				var ccol: Color = u.get("col", Color("#2a2a34"))
+				draw_rect(Rect2(p.x - cw * 0.5, p.y - 3, cw, 4), ccol)
+				draw_rect(Rect2(p.x - cw * 0.5 + 3, p.y - 6, cw - 7, 3), ccol.darkened(0.2))
 	for s in shells:
 		var sc: Color = Color(2.4, 1.9, 0.7) if s.heavy else Color(2.0, 1.6, 0.6)
 		draw_rect(Rect2(s.pos.x - 1, s.pos.y - 1, 3 if s.heavy else 2, 3 if s.heavy else 2), sc)
