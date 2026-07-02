@@ -1,4 +1,4 @@
-extends Node2D
+﻿extends Node2D
 # CALAMITY v4 — The Swarm over New Kowloon.
 # Artist facades (Warped City, CC0 by ansimuz) + HDR glow + carved destruction.
 # 640x360 native. Ground y=0, up negative. Facades sliced from sheet at load.
@@ -12,17 +12,20 @@ const CITY_DEFS := {
 		"sky": [Color("#0a0d1f"), Color("#1a1440"), Color("#3d1a52"), Color("#7a2244"), Color("#b03840")],
 		"big_chance": 0.28, "gap_min": 14.0, "gap_max": 48.0, "spawn_mult": 1.0,
 		"moon": Color(1.55, 0.35, 0.3), "moon_r": 20.0, "lamp": Color(1.9, 1.5, 0.9),
-		"aurora": false, "smog": false, "street": Color("#383050")},
+		"aurora": false, "smog": false, "street": Color("#383050"),
+		"mix": {"tower": 0.52, "house": 0.12, "shop": 0.2, "church": 0.03, "school": 0.05, "mall": 0.08}},
 	"thornspire": {"name": "THORNSPIRE", "tint": Color(0.85, 0.9, 1.35), "defense": 1.35,
 		"sky": [Color("#020308"), Color("#070c22"), Color("#101a40"), Color("#1c2c58"), Color("#2a4470")],
 		"big_chance": 0.55, "gap_min": 8.0, "gap_max": 26.0, "spawn_mult": 1.0,
 		"moon": Color(1.6, 1.7, 2.0), "moon_r": 30.0, "lamp": Color(1.2, 1.7, 2.0),
-		"aurora": true, "smog": false, "street": Color("#2a3450")},
+		"aurora": true, "smog": false, "street": Color("#2a3450"),
+		"mix": {"tower": 0.42, "house": 0.14, "shop": 0.12, "church": 0.14, "school": 0.06, "mall": 0.12}},
 	"ashport": {"name": "ASHPORT", "tint": Color(1.18, 0.82, 0.5), "defense": 0.75,
 		"sky": [Color("#0f0a06"), Color("#241408"), Color("#42250c"), Color("#663a10"), Color("#8a5416")],
 		"big_chance": 0.10, "gap_min": 24.0, "gap_max": 70.0, "spawn_mult": 1.7,
 		"moon": Color(1.3, 0.7, 0.25), "moon_r": 13.0, "lamp": Color(1.9, 1.1, 0.4),
-		"aurora": false, "smog": true, "street": Color("#403020")},
+		"aurora": false, "smog": true, "street": Color("#403020"),
+		"mix": {"tower": 0.16, "house": 0.38, "shop": 0.2, "church": 0.04, "school": 0.06, "mall": 0.16}},
 }
 const END_TEXT := {
 	"swarm": {"win": "CITY RAZED", "win_s": "the swarm moves on, fat with light and marrow.",
@@ -59,6 +62,10 @@ var pops: Array = []
 var people: Array = []
 var cars: Array = []
 var lamps: Array = []            # destructible street lights {x, dead}
+var props: Array = []            # destructible street furniture {x, tex, dead}
+var critters: Array = []         # pigeons, dogs, pigs {kind, pos, vx, vy, panic, dead, flying}
+var prop_texs: Array = []
+var banner_imgs: Array = []
 var spawn_cd := 3.0
 
 var facades: Array = []     # sliced Images from the sheet
@@ -126,6 +133,8 @@ func _setup_sfx() -> void:
 	sfx_bank["pick"] = _synth(0.18, 10.0, 660.0, 0.8)
 	sfx_bank["eclipse"] = _synth(1.6, 1.4, 48.0, 0.9)
 	sfx_bank["hit"] = _synth(0.13, 22.0, 200.0, 0.5)
+	sfx_bank["bell"] = _synth(1.8, 1.2, 190.0, 0.92)
+	sfx_bank["glass"] = _synth(0.3, 16.0, 2400.0, 0.25)
 
 func _synth(dur: float, decay: float, tone_hz: float, tone_mix: float) -> AudioStreamWAV:
 	var rate := 22050
@@ -219,23 +228,181 @@ func _slice_facades() -> void:
 	tex_sky_b = load("res://art/skyline-b.png")
 	tex_mid = load("res://art/buildings-bg.png")
 
+# ---------- procedural low-rise generator (pack-palette pixel art) ----------
+const PAL_WALL := [Color("#241726"), Color("#2c1a22"), Color("#1e1c2e"), Color("#2a2030")]
+const PAL_LIT := [Color("#ffd075"), Color("#ff9bc4"), Color("#7de0e6"), Color("#ffb03a")]
+
+func _gen_lowrise(kind: String) -> Image:
+	var wall: Color = PAL_WALL[randi() % PAL_WALL.size()]
+	var lit: Color = PAL_LIT[randi() % PAL_LIT.size()]
+	var dark := wall.darkened(0.4)
+	var roof := wall.darkened(0.55)
+	var w: int
+	var h: int
+	match kind:
+		"house":
+			w = randi_range(30, 42)
+			h = randi_range(26, 34)
+		"shop":
+			w = randi_range(42, 60)
+			h = randi_range(22, 30)
+		"church":
+			w = randi_range(44, 56)
+			h = 92
+		"school":
+			w = randi_range(70, 92)
+			h = randi_range(34, 42)
+		_:  # mall
+			w = randi_range(80, 110)
+			h = randi_range(38, 50)
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	match kind:
+		"house":
+			var roof_h := 10
+			img.fill_rect(Rect2i(0, roof_h, w, h - roof_h), wall)
+			for yy in roof_h:   # pitched roof
+				var inset := int((roof_h - yy) * (w * 0.5 / roof_h)) - 1
+				img.fill_rect(Rect2i(maxi(0, inset), yy, maxi(1, w - inset * 2), 1), roof)
+			img.fill_rect(Rect2i(w - 10, 1, 4, roof_h), dark)   # chimney
+			img.fill_rect(Rect2i(4, h - 12, 7, 12), dark)       # door
+			img.fill_rect(Rect2i(5, h - 11, 5, 9), Color("#120a14"))
+			var wx := 15
+			while wx < w - 8:   # windows
+				img.fill_rect(Rect2i(wx, h - 14, 6, 7), dark)
+				img.fill_rect(Rect2i(wx + 1, h - 13, 4, 5), lit if randf() < 0.6 else Color("#151020"))
+				wx += 10
+		"shop":
+			img.fill_rect(Rect2i(0, 0, w, h), wall)
+			img.fill_rect(Rect2i(0, 0, w, 8), roof)
+			img.fill_rect(Rect2i(2, 1, w - 4, 6), lit)          # sign band
+			for sx in range(4, w - 6, 7):                        # sign "letters"
+				if randf() < 0.7:
+					img.fill_rect(Rect2i(sx, 2, 4, 4), dark)
+			var gx := 3
+			while gx < w - 8:   # glass front
+				img.fill_rect(Rect2i(gx, h - 16, 8, 15), Color("#0e1a24"))
+				img.fill_rect(Rect2i(gx + 1, h - 15, 6, 13), Color(0.35, 0.65, 0.7, 1.0) if randf() < 0.7 else Color("#101822"))
+				gx += 10
+		"church":
+			var nave_h := 44
+			img.fill_rect(Rect2i(0, h - nave_h, w, nave_h), wall)
+			for yy in 8:   # nave roof
+				var inset := int((8 - yy) * (w * 0.5 / 8.0))
+				img.fill_rect(Rect2i(maxi(0, inset), h - nave_h - 8 + yy, maxi(1, w - inset * 2), 1), roof)
+			# spire tower
+			var tw := 16
+			var tx := 4
+			img.fill_rect(Rect2i(tx, 22, tw, h - 22), wall.darkened(0.1))
+			for yy in 18:   # spire
+				var inset := int(yy * 0.5)
+				img.fill_rect(Rect2i(tx + 8 - (9 - inset), 4 + yy, maxi(1, (9 - inset) * 2), 1), roof)
+			img.fill_rect(Rect2i(tx + 7, 0, 2, 6), lit)          # glowing cross
+			img.fill_rect(Rect2i(tx + 5, 2, 6, 2), lit)
+			# rose window
+			var cxp := tx + tw + (w - tx - tw) / 2
+			for dy in range(-4, 5):
+				for dxp in range(-4, 5):
+					if Vector2(dxp, dy).length() <= 4.2:
+						img.set_pixel(cxp + dxp, h - nave_h + 10 + dy, lit if Vector2(dxp, dy).length() > 2.0 else dark)
+			# arched windows
+			for ax in range(tx + tw + 4, w - 8, 10):
+				img.fill_rect(Rect2i(ax, h - 22, 5, 14), dark)
+				img.fill_rect(Rect2i(ax + 1, h - 21, 3, 12), lit if randf() < 0.5 else Color("#151020"))
+				img.set_pixel(ax + 2, h - 23, dark)
+			img.fill_rect(Rect2i(cxp - 4, h - 14, 9, 14), dark)   # portal
+			img.fill_rect(Rect2i(cxp - 3, h - 13, 7, 12), Color("#0c0810"))
+		"school":
+			img.fill_rect(Rect2i(0, 0, w, h), wall)
+			img.fill_rect(Rect2i(0, 0, w, 5), roof)
+			for fy in 2:   # two window rows
+				for wx2 in range(6, w - 10, 12):
+					img.fill_rect(Rect2i(wx2, 9 + fy * 14, 8, 9), dark)
+					img.fill_rect(Rect2i(wx2 + 1, 10 + fy * 14, 6, 7), lit if randf() < 0.5 else Color("#141222"))
+			var dx2 := w / 2 - 5
+			img.fill_rect(Rect2i(dx2, h - 13, 11, 13), dark)      # double door
+			img.fill_rect(Rect2i(dx2 + 1, h - 12, 4, 11), Color("#10141c"))
+			img.fill_rect(Rect2i(dx2 + 6, h - 12, 4, 11), Color("#10141c"))
+			img.fill_rect(Rect2i(2, 0, 2, 14), dark)              # flag pole
+			img.fill_rect(Rect2i(4, 1, 6, 4), Color(0.8, 0.3, 0.3))
+		_:  # mall
+			img.fill_rect(Rect2i(0, 0, w, h), wall)
+			img.fill_rect(Rect2i(0, 0, w, 7), roof)
+			img.fill_rect(Rect2i(w / 4, 1, w / 2, 8), lit)        # big roof sign
+			for sx2 in range(w / 4 + 3, w / 4 + w / 2 - 4, 8):
+				img.fill_rect(Rect2i(sx2, 3, 5, 4), dark)
+			var gy := 12
+			while gy < h - 4:   # glass floors
+				for gx2 in range(3, w - 8, 9):
+					img.fill_rect(Rect2i(gx2, gy, 7, 8), Color("#0e1a24"))
+					img.fill_rect(Rect2i(gx2 + 1, gy + 1, 5, 6), Color(0.3, 0.55, 0.62) if randf() < 0.65 else Color("#101822"))
+				gy += 11
+			img.fill_rect(Rect2i(w / 2 - 8, h - 14, 16, 14), dark)  # entrance
+			img.fill_rect(Rect2i(w / 2 - 7, h - 13, 14, 12), Color("#161e2a"))
+	return img
+
+func _pick_kind() -> String:
+	var mix: Dictionary = city_def.mix
+	var r := randf()
+	var acc := 0.0
+	for k in mix:
+		acc += mix[k]
+		if r <= acc:
+			return k
+	return "tower"
+
 func _build_city() -> void:
+	# banner art for baking onto tower facades
+	for bn in ["banner-big-1", "banner-neon-1", "banner-sushi-1", "banner-coke-1", "banner-side-1", "hotel-sign"]:
+		var im: Image = load("res://art/props/%s.png" % bn).get_image()
+		if im.is_compressed():
+			im.decompress()
+		im.convert(Image.FORMAT_RGBA8)
+		banner_imgs.append(im)
 	var x := 380.0
 	var i := 0
 	while x < WORLD_W - 620.0:
-		var f: Image = facades[i % facades.size()]
-		var sc: float = 2.0 if _hash(x) < city_def.big_chance else 1.0
-		buildings.append(_mk_building(x, f, sc, false))
-		x += f.get_width() * sc + randf_range(city_def.gap_min, city_def.gap_max)
-		i += 1
+		var kind := _pick_kind()
+		if kind == "tower":
+			var f: Image = facades[i % facades.size()]
+			var sc: float = 2.0 if _hash(x) < city_def.big_chance else 1.0
+			buildings.append(_mk_building(x, f, sc, false, "tower"))
+			x += f.get_width() * sc + randf_range(city_def.gap_min, city_def.gap_max)
+			i += 1
+		elif kind == "house":
+			# houses come in rows
+			for hn in randi_range(2, 4):
+				var hi := _gen_lowrise("house")
+				buildings.append(_mk_building(x, hi, 1.0, false, "house"))
+				x += hi.get_width() + randf_range(4, 10)
+			x += randf_range(city_def.gap_min, city_def.gap_max)
+		else:
+			var li := _gen_lowrise(kind)
+			buildings.append(_mk_building(x, li, 1.0, false, kind))
+			x += li.get_width() + randf_range(city_def.gap_min, city_def.gap_max)
 	# citadel: biggest facade at 2x
 	var big_i := 0
 	for j in facades.size():
 		if facades[j].get_height() > facades[big_i].get_height():
 			big_i = j
-	buildings.append(_mk_building(x, facades[big_i], 2.0, true))
+	buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
 	for b in buildings:
 		total_mass += b.maxhp
+	# destructible street furniture
+	for pn in ["control-box-1", "control-box-2", "control-box-3", "monitor-face-1"]:
+		prop_texs.append(load("res://art/props/%s.png" % pn))
+	for k in 40:
+		props.append({"x": randf_range(320, WORLD_W - 340), "tex": prop_texs[randi() % prop_texs.size()], "dead": false})
+	# critters — pigeons everywhere, dogs in the gutters, pigs in ashport
+	for k in 30:
+		critters.append({"kind": "pigeon", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
+			"panic": false, "dead": false, "o": randf() * TAU})
+	for k in 8:
+		critters.append({"kind": "dog", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
+			"panic": false, "dead": false, "o": randf() * TAU})
+	if Global.city == "ashport":
+		for k in 12:
+			critters.append({"kind": "pig", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
+				"panic": false, "dead": false, "o": randf() * TAU})
 	for k in 26:
 		cars.append({"x": randf_range(300, WORLD_W - 400), "w": randf_range(14, 19), "dead": false,
 			"col": [Color("#20303a"), Color("#3a2030"), Color("#2a2a34"), Color("#1c2426")][randi() % 4]})
@@ -247,16 +414,23 @@ func _build_city() -> void:
 		people.append({"pos": Vector2(randf_range(320, WORLD_W - 350), 0), "vx": 0.0, "panic": false,
 			"o": randf() * TAU, "col": Color(randf_range(0.4, 0.7), randf_range(0.4, 0.6), randf_range(0.5, 0.75))})
 
-func _mk_building(x: float, src: Image, sc: float, cit: bool) -> Dictionary:
+func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "tower") -> Dictionary:
 	var img := Image.new()
 	img.copy_from(src)
+	# bake a neon banner / sign onto tower walls — destruction eats it with the wall
+	if kind == "tower" and not cit and randf() < 0.5 and not banner_imgs.is_empty():
+		var bn: Image = banner_imgs[randi() % banner_imgs.size()]
+		if bn.get_width() < img.get_width() - 8 and bn.get_height() < img.get_height() - 20:
+			var bx := randi_range(4, img.get_width() - bn.get_width() - 4)
+			var by := randi_range(10, img.get_height() - bn.get_height() - 10)
+			img.blend_rect(bn, Rect2i(0, 0, bn.get_width(), bn.get_height()), Vector2i(bx, by))
 	var w: float = img.get_width() * sc
 	var h: float = img.get_height() * sc
 	var mass: float = w * h * (0.020 if cit else 0.012)
 	return {"x": x, "w": w, "h": h, "sc": sc, "img": img,
 		"tex": ImageTexture.create_from_image(img),
 		"hp": mass, "maxhp": mass, "holes": [], "dead": false, "dying": 0.0, "cit": cit,
-		"cur_h": h, "seed": x * 0.77, "burn": 0.0}
+		"cur_h": h, "seed": x * 0.77, "burn": 0.0, "kind": kind}
 
 func _hash(n: float) -> float:
 	return fmod(absf(sin(n * 127.1) * 43758.55), 1.0)
@@ -309,7 +483,7 @@ func _process(delta: float) -> void:
 			score_f += 3.0 * combo * TIER_MULT[tier]
 			bio += 0.6
 			if b.hp <= 0.0:
-				b.dying = 0.6
+				_collapse(b)
 	for pod in pods:
 		if pod.t_left <= 0.0 and nodes.has("creep") and randf() < 0.25 and not pod.b.dead:
 			pods.append({"b": pod.b, "p": pod.p + Vector2(randf_range(-14, 14), randf_range(-14, 14)),
@@ -354,7 +528,7 @@ func _process(delta: float) -> void:
 			if randf() < b.burn * 0.4 * delta:
 				_carve(b, Vector2(b.x + randf_range(4, b.w - 4), -randf_range(6, b.cur_h - 6)), 3.0)
 			if b.hp <= 0.0:
-				b.dying = 0.6
+				_collapse(b)
 	for p in parts:
 		p.pos += p.vel * delta
 		if not p.get("fire", false):
@@ -398,6 +572,34 @@ func _people(delta: float) -> void:
 			p.vx = sin(t * 0.6 + p.o) * 9.0
 		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, WORLD_W - 320)
 	people = people.filter(func(p): return not p.get("dead", false))
+	# critters scatter
+	for cr in critters:
+		var d2: float = pos.x - cr.pos.x
+		if (absf(d2) < 110.0 and pos.y > -80.0) or eclipse_t > 0.0:
+			cr.panic = true
+		match cr.kind:
+			"pigeon":
+				if cr.panic:
+					cr.vy = move_toward(cr.vy, -70.0, 300.0 * delta)
+					cr.vx = move_toward(cr.vx, -signf(d2) * 50.0, 200.0 * delta)
+					cr.pos += Vector2(cr.vx, cr.vy) * delta
+					if cr.pos.y < -260.0:
+						cr.dead = true   # flew away
+				else:
+					cr.pos.x += sin(t * 1.2 + cr.o) * 4.0 * delta
+			"dog":
+				if cr.panic:
+					cr.vx = move_toward(cr.vx, -signf(d2) * 62.0, 260.0 * delta)
+				else:
+					cr.vx = sin(t * 0.5 + cr.o) * 14.0
+				cr.pos.x = clampf(cr.pos.x + cr.vx * delta, 300, WORLD_W - 320)
+			"pig":
+				if cr.panic:
+					cr.vx = move_toward(cr.vx, -signf(d2) * 34.0, 160.0 * delta)
+				else:
+					cr.vx = sin(t * 0.35 + cr.o) * 7.0
+				cr.pos.x = clampf(cr.pos.x + cr.vx * delta, 300, WORLD_W - 320)
+	critters = critters.filter(func(cr): return not cr.dead)
 
 # --- tendril + evolution state ---
 const BIO_THRESH := [180.0, 520.0, 1100.0]
@@ -486,7 +688,7 @@ func _tendrils(delta: float) -> void:
 				_carve(b, Vector2(wx, -randf_range(4, 22)), 5.0)
 				b.hp -= 2.0
 				if b.hp <= 0.0:
-					b.dying = 0.6
+					_collapse(b)
 		if randf() < 0.8:
 			parts.append({"pos": Vector2(wx, -2), "vel": Vector2(0, randf_range(-60, -20)),
 				"life": 0.4, "col": Color(0.5, 0.4, 0.45), "size": 2.5})
@@ -648,7 +850,7 @@ func _keraunos(delta: float) -> void:
 					score_f += 8.0 * combo * TIER_MULT[tier]
 					bolts.append({"from": o.pos, "to": hit, "t_left": 0.1})
 					if pick.hp <= 0.0:
-						pick.dying = 0.6
+						_collapse(pick)
 				elif pick is Dictionary and pick.has("x"):
 					bolts.append({"from": o.pos, "to": Vector2(pick.x, -24), "t_left": 0.1})
 					_hit_props(Vector2(pick.x, -20), 6.0)
@@ -735,7 +937,7 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 			_chunks(hit, 6)
 			_pop(hit + Vector2(0, -12), "+%d" % int(gain), Color("#aaddff"))
 			if b.hp <= 0.0:
-				b.dying = 0.6
+				_collapse(b)
 				score_f += b.maxhp * 8.0 * combo * TIER_MULT[tier]
 			break
 	for u in units:
@@ -773,7 +975,7 @@ func _skyfall(p: Vector2) -> void:
 			score_f += 260.0 * combo * TIER_MULT[tier]
 			bio += 20.0
 			if b.hp <= 0.0:
-				b.dying = 0.6
+				_collapse(b)
 	for u in units:
 		if absf(u.pos.x - p.x) < w_col:
 			u.dead = true
@@ -890,7 +1092,7 @@ func _tzitzi(delta: float) -> void:
 					b.holes.append({"p": pos - Vector2(b.x, -b.h), "o": randf() * TAU})
 					_chunks(pos, 2)
 				if b.hp <= 0.0:
-					b.dying = 0.6
+					_collapse(b)
 					score_f += b.maxhp * 8.0 * combo * TIER_MULT[tier]
 		for u in units:
 			if (u.pos + Vector2(0, -8)).distance_to(pos) < 16.0:
@@ -933,7 +1135,7 @@ func _unit_crash_buildings(u: Dictionary, dmg: float) -> bool:
 				shake = maxf(shake, 3.0)
 				score_f += 6.0 * combo * TIER_MULT[tier]
 				if b.hp <= 0.0:
-					b.dying = 0.6
+					_collapse(b)
 			return true
 	return false
 
@@ -973,7 +1175,7 @@ func _rmb_active() -> void:
 				_carve(b, world + Vector2(randf_range(-6, 6), randf_range(-6, 6)), 7.0)
 				b.hp -= 22.0
 				if b.hp <= 0.0 and b.dying <= 0.0:
-					b.dying = 0.6
+					_collapse(b)
 			_boom(world, 16, Color(0.9, 1.8, 0.5), 100.0)
 			_shockwave(world, 34.0)
 			score_f += 40.0 * combo * TIER_MULT[tier]
@@ -1016,11 +1218,59 @@ func _rmb_active() -> void:
 					score_f += 8.0 * combo * TIER_MULT[tier]
 					bio += 3.0
 					if b.hp <= 0.0:
-						b.dying = 0.6
+						_collapse(b)
 		shake = maxf(shake, 4.0)
 		combo_idle = 0.0
 
+func _collapse(b: Dictionary) -> void:
+	if b.dying > 0.0 or b.dead:
+		return
+	b.dying = 0.6
+	var cx: float = b.x + b.w * 0.5
+	# dust wave rolling out from the base
+	for side in [-1.0, 1.0]:
+		for i in 7:
+			parts.append({"pos": Vector2(cx + side * i * b.w * 0.12, -2 - randf() * 4),
+				"vel": Vector2(side * randf_range(40, 90), randf_range(-16, -4)),
+				"life": randf_range(0.5, 1.2), "col": Color(0.35, 0.3, 0.33), "size": randf_range(3.0, 6.0)})
+	# glass shower
+	var glass_n: int = 24 if b.kind in ["mall", "shop", "tower"] else 8
+	for i in glass_n:
+		var a := randf() * TAU
+		parts.append({"pos": Vector2(b.x + randf() * b.w, -randf() * b.cur_h),
+			"vel": Vector2(cos(a) * randf_range(20, 70), randf_range(-80, -20)),
+			"life": randf_range(0.4, 1.0), "col": Color(0.7, 1.5, 1.8), "size": 1.5})
+	match b.kind:
+		"church":
+			_sfx("bell")
+			_pop(Vector2(cx, -b.h - 16), "THE BELL FALLS SILENT", Color(1.8, 1.4, 0.6))
+		"school":
+			threat = minf(100.0, threat + 6.0)   # the world does not forgive this
+			_pop(Vector2(cx, -b.h - 16), "ATROCITY  — THREAT SURGES", Color(2.0, 0.4, 0.4))
+		"mall":
+			_sfx("glass")
+	_sfx("crumble")
+
 func _hit_props(p: Vector2, r: float) -> void:
+	for pr in props:
+		if pr.dead or absf(pr.x - p.x) > r + 10.0 or p.y < -26.0:
+			continue
+		pr.dead = true
+		score_f += 25.0 * combo * TIER_MULT[tier]
+		_boom(Vector2(pr.x, -8), 10, Color(1.6, 1.4, 1.8), 80.0)
+		_sfx("glass")
+	for cr in critters:
+		if cr.dead or absf(cr.pos.x - p.x) > r or p.y < -30.0:
+			continue
+		cr.dead = true
+		score_f += 12.0 * combo * TIER_MULT[tier]
+		bio += 1.5
+		if cr.kind == "pigeon":
+			for i in 6:
+				parts.append({"pos": cr.pos + Vector2(0, -3), "vel": Vector2(randf_range(-30, 30), randf_range(-40, -8)),
+					"life": randf_range(0.4, 0.9), "col": Color(0.7, 0.68, 0.72), "size": 1.5})
+		else:
+			_mist(cr.pos + Vector2(0, -3))
 	# lamps and cars are destructible — everything is
 	for l in lamps:
 		if l.dead or absf(l.x - p.x) > r or p.y < -34.0:
@@ -1085,7 +1335,7 @@ func _chew(b: Dictionary, delta: float) -> void:
 		if int(t * 7.7) % 3 == 0:
 			_pop(aim + Vector2(0, -10), "+%d" % int(bite * 1.6 * combo * TIER_MULT[tier] * 8.0), Color("#ffcf8a"))
 	if b.hp <= 0.0:
-		b.dying = 0.6
+		_collapse(b)
 		var gain := int(b.maxhp * 8.0 * combo * TIER_MULT[tier] * (4.0 if b.cit else 1.0))
 		score_f += gain
 		combo = min(9.5, combo + 0.5)
@@ -1719,6 +1969,35 @@ func _draw_street(left: float, right: float) -> void:
 			draw_rect(Rect2(c.x + c.w - 1, -4, 1, 2), Color(1.6, 0.5, 0.3, 0.8))
 
 func _draw_actors() -> void:
+	# street furniture
+	for pr in props:
+		if pr.dead:
+			draw_rect(Rect2(pr.x - 4, -4, 10, 4), Color("#120c14"))
+			continue
+		var tx: Texture2D = pr.tex
+		draw_texture(tx, Vector2(pr.x - tx.get_width() * 0.35, -tx.get_height() * 0.7), Color(0.8, 0.75, 0.9))
+	# critters
+	for cr in critters:
+		var cp: Vector2 = cr.pos
+		match cr.kind:
+			"pigeon":
+				var wing: float = sin(t * 18.0 + cr.o) * 2.0 if cr.panic else 0.0
+				draw_rect(Rect2(cp.x - 1.5, cp.y - 3, 3, 2), Color(0.6, 0.58, 0.64))
+				draw_rect(Rect2(cp.x, cp.y - 4, 1.5, 1.5), Color(0.5, 0.48, 0.56))
+				if cr.panic:
+					draw_line(cp + Vector2(-1, -3), cp + Vector2(-4, -3 - wing), Color(0.65, 0.62, 0.68), 1)
+					draw_line(cp + Vector2(1, -3), cp + Vector2(4, -3 - wing), Color(0.65, 0.62, 0.68), 1)
+			"dog":
+				var lope: float = sin(t * 12.0 + cr.o) * 1.5 if cr.panic else 0.0
+				draw_rect(Rect2(cp.x - 4, cp.y - 4, 8, 3), Color(0.32, 0.26, 0.22))
+				draw_rect(Rect2(cp.x + 3 * signf(cr.vx + 0.1), cp.y - 6, 3, 3), Color(0.32, 0.26, 0.22))
+				draw_line(cp + Vector2(-3, -1), cp + Vector2(-3 - lope, 0), Color(0.26, 0.2, 0.18), 1)
+				draw_line(cp + Vector2(3, -1), cp + Vector2(3 + lope, 0), Color(0.26, 0.2, 0.18), 1)
+			"pig":
+				draw_rect(Rect2(cp.x - 4, cp.y - 5, 9, 4), Color(0.85, 0.6, 0.6))
+				draw_rect(Rect2(cp.x + 4 * signf(cr.vx + 0.1), cp.y - 6, 3, 3), Color(0.8, 0.55, 0.55))
+				draw_rect(Rect2(cp.x - 3, cp.y - 1, 2, 1), Color(0.7, 0.45, 0.45))
+				draw_rect(Rect2(cp.x + 2, cp.y - 1, 2, 1), Color(0.7, 0.45, 0.45))
 	for p in people:
 		var run: float = absf(p.vx)
 		var leg: float = sin(t * (14.0 if run > 20 else 6.0) + p.o) * (2.0 if run > 5 else 0.6)
