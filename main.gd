@@ -46,6 +46,10 @@ var _shot_frames := 0
 
 func _ready() -> void:
 	randomize()
+	character = Global.character
+	if character == "tzitzimitl":
+		for i in 16:
+			segs.append(pos)
 	_setup_env()
 	_slice_facades()
 	_build_city()
@@ -213,12 +217,21 @@ func _process(delta: float) -> void:
 			pods.append({"b": pod.b, "p": pod.p + Vector2(randf_range(-14, 14), randf_range(-14, 14)),
 				"t_left": 6.0, "tick": 0.5})
 	pods = pods.filter(func(p): return p.t_left > 0.0 and not p.b.dead)
-	# biomass threshold -> evolution draft
-	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
+	# biomass threshold -> evolution draft (swarm only for now)
+	if character == "swarm" and bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
 		_open_draft()
 	if not over:
-		_move(delta)
-		_tendrils(delta)
+		match character:
+			"keraunos":
+				_move(delta)
+				_keraunos(delta)
+			"tzitzimitl":
+				_tzitzi_move(delta)
+				_tzitzi(delta)
+			_:
+				_move(delta)
+				_tendrils(delta)
+		lmb_prev = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		_people(delta)
 		_army(delta)
 		threat = min(100.0, threat + 0.22 * delta)
@@ -296,6 +309,19 @@ var slams: Array = []            # {x, dir, dist}
 var aftershock_q: Array = []     # {p, t_left}
 var max_grabs := 1
 var dmg_taken_mult := 1.0
+
+# --- character dispatch ---
+var character := "swarm"
+var lmb_prev := false
+# keraunos
+var bolt_charges := 3.0
+var bolts: Array = []            # {from, to, t_left}
+# tzitzimitl
+var segs: Array = []             # serpent body trail
+var dive_t := 0.0
+var dive_dir := Vector2.RIGHT
+var dive_cd := 0.0
+var eclipse_t := 0.0
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
@@ -432,6 +458,146 @@ func _tendrils(delta: float) -> void:
 		combo_idle += delta
 		if combo_idle > 1.2 and combo > 1.0:
 			combo = max(1.0, combo - 1.6 * delta)
+
+# ================= KERAUNOS =================
+func _keraunos(delta: float) -> void:
+	bolt_charges = minf(3.0, bolt_charges + delta / 1.2)
+	rmb_cd -= delta
+	aim = get_global_mouse_position()
+	aim_clamped = false
+	feeding = false
+	for b2 in bolts:
+		b2.t_left -= delta
+	bolts = bolts.filter(func(b2): return b2.t_left > 0.0)
+	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if lmb and not lmb_prev and bolt_charges >= 1.0:
+		bolt_charges -= 1.0
+		_strike(aim)
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and bio >= 100.0:
+		# TEMPEST: barrage across the visible city
+		rmb_cd = 2.0
+		bio -= 100.0
+		for i in 6:
+			var tx: float = cam.position.x + randf_range(-300, 300)
+			var ty: float = -randf_range(10, 200)
+			for b in buildings:
+				if b.dead or b.dying > 0.0:
+					continue
+				if tx >= b.x and tx <= b.x + b.w:
+					ty = -b.cur_h + randf_range(2, 30)
+					break
+			_strike(Vector2(tx, ty))
+
+func _strike(p: Vector2) -> void:
+	bolts.append({"from": Vector2(p.x + randf_range(-30, 30), -370), "to": p, "t_left": 0.16})
+	parts.append({"pos": p, "vel": Vector2.ZERO, "life": 0.2, "col": Color(1.8, 2.2, 2.6), "flash": true, "size": 14.0})
+	shake = maxf(shake, 7.0)
+	combo_idle = 0.0
+	threat = minf(100.0, threat + 1.2)
+	for b in buildings:
+		if b.dead or b.dying > 0.0:
+			continue
+		if p.x >= b.x - 6 and p.x <= b.x + b.w + 6 and p.y >= -b.cur_h - 10:
+			var hit := Vector2(clampf(p.x, b.x + 4, b.x + b.w - 4), clampf(p.y, -b.cur_h + 4, -6.0))
+			_carve(b, hit, randf_range(7.0, 11.0))
+			_carve(b, hit + Vector2(randf_range(-6, 6), randf_range(4, 10)), 5.0)
+			b.holes.append({"p": hit - Vector2(b.x, -b.h), "o": randf() * TAU})
+			b.hp -= 30.0
+			var gain: float = 30.0 * 1.6 * combo * TIER_MULT[tier]
+			score_f += gain
+			bio += 8.0
+			combo = minf(9.5, combo + 0.25)
+			_chunks(hit, 4)
+			_pop(hit + Vector2(0, -12), "+%d" % int(gain), Color("#aaddff"))
+			if b.hp <= 0.0:
+				b.dying = 0.6
+				score_f += b.maxhp * 8.0 * combo * TIER_MULT[tier]
+			break
+	for u in units:
+		if (u.pos + Vector2(0, -8)).distance_to(p) < 20.0:
+			u.dead = true
+			_kill_unit(u)
+	units = units.filter(func(u): return not u.get("dead", false))
+	for pe in people:
+		if Vector2(pe.pos.x, -4).distance_to(p) < 16.0:
+			pe.dead = true
+			score_f += 20.0 * combo * TIER_MULT[tier]
+			bio += 2.0
+			_mist(Vector2(pe.pos.x, -5))
+
+# ================= TZITZIMITL =================
+func _tzitzi_move(delta: float) -> void:
+	var mouse := get_global_mouse_position()
+	aim = mouse
+	aim_clamped = false
+	feeding = false
+	dive_cd -= delta
+	rmb_cd -= delta
+	if dive_t > 0.0:
+		dive_t -= delta
+		pos += dive_dir * 640.0 * delta
+	else:
+		var des := (mouse - pos)
+		vel += des.limit_length(240.0) * 6.0 * delta
+		vel *= pow(0.05, delta)
+		vel = vel.limit_length(280.0)
+		pos += vel * delta
+	pos.x = clamp(pos.x, 40, WORLD_W - 40)
+	pos.y = clamp(pos.y, -340, -10)
+	segs.push_front(pos)
+	while segs.size() > 16:
+		segs.pop_back()
+
+func _tzitzi(delta: float) -> void:
+	if eclipse_t > 0.0:
+		eclipse_t -= delta
+	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var cd_needed: float = 0.25 if eclipse_t > 0.0 else 0.55
+	if lmb and not lmb_prev and dive_cd <= 0.0:
+		dive_cd = cd_needed
+		dive_t = 0.22
+		dive_dir = (get_global_mouse_position() - pos).normalized()
+		combo_idle = 0.0
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and bio >= 80.0 and eclipse_t <= 0.0:
+		rmb_cd = 1.0
+		bio -= 80.0
+		eclipse_t = 10.0
+		shake = 8.0
+		_pop(pos + Vector2(0, -26), "E C L I P S E", Color(2.0, 1.2, 0.4))
+	# diving: pierce everything on the path
+	if dive_t > 0.0:
+		var mult: float = 1.6 if eclipse_t > 0.0 else 1.0
+		for b in buildings:
+			if b.dead or b.dying > 0.0:
+				continue
+			if pos.x >= b.x and pos.x <= b.x + b.w and pos.y >= -b.cur_h and pos.y <= 0.0:
+				_carve(b, pos, 7.0)
+				b.hp -= 3.2 * mult
+				var gain: float = 5.0 * combo * TIER_MULT[tier] * mult
+				score_f += gain
+				bio += 1.2
+				combo = minf(9.5, combo + 0.02)
+				if randf() < 0.3:
+					b.holes.append({"p": pos - Vector2(b.x, -b.h), "o": randf() * TAU})
+					_chunks(pos, 2)
+				if b.hp <= 0.0:
+					b.dying = 0.6
+					score_f += b.maxhp * 8.0 * combo * TIER_MULT[tier]
+		for u in units:
+			if (u.pos + Vector2(0, -8)).distance_to(pos) < 16.0:
+				u.dead = true
+				_kill_unit(u)
+		units = units.filter(func(u): return not u.get("dead", false))
+		for pe in people:
+			if Vector2(pe.pos.x, -4).distance_to(pos) < 12.0:
+				pe.dead = true
+				score_f += 20.0 * combo * TIER_MULT[tier]
+				bio += 2.0
+				_mist(Vector2(pe.pos.x, -5))
+	if dive_t <= 0.0:
+		combo_idle += delta
+		if combo_idle > 1.4 and combo > 1.0:
+			combo = max(1.0, combo - 1.4 * delta)
 
 func _unit_crash_buildings(u: Dictionary, dmg: float) -> bool:
 	var upos: Vector2 = u.pos + Vector2(0, -8)
@@ -725,7 +891,10 @@ func _army(delta: float) -> void:
 			var origin: Vector2 = u.pos + Vector2(0, -18 if u.kind != "heli" else 4)
 			var lead: Vector2 = pos + vel * 0.35
 			var speed: float = 120.0 if u.kind == "police" else 165.0
-			shells.append({"pos": origin, "vel": (lead - origin).normalized() * speed, "life": 4.0,
+			var dirv := (lead - origin).normalized()
+			if eclipse_t > 0.0:
+				dirv = dirv.rotated(randf_range(-0.55, 0.55))  # blind in the dark
+			shells.append({"pos": origin, "vel": dirv * speed, "life": 4.0,
 				"heavy": u.kind != "police"})
 	for s in shells:
 		s.pos += s.vel * delta
@@ -760,6 +929,8 @@ func _end(m: String, s: String) -> void:
 func _input(e: InputEvent) -> void:
 	if over and e.is_action_pressed("restart"):
 		get_tree().reload_current_scene()
+	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
+		get_tree().change_scene_to_file("res://menu.tscn")
 
 func _boom(p: Vector2, n: int, col: Color, sp: float) -> void:
 	for i in n:
@@ -807,7 +978,13 @@ func _build_hud() -> void:
 	hud.sub.size = Vector2(640, 20)
 	hud.sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var help := _label(layer, Vector2(10, 344), 8, Color(0.85, 0.9, 1, 0.45))
-	help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / your evolved skill.  R — restart."
+	match character:
+		"keraunos":
+			help.text = "WASD — fly.  LMB — lightning strike at cursor (3 banked).  RMB — TEMPEST at full storm.  ESC — menu."
+		"tzitzimitl":
+			help.text = "serpent follows your cursor.  LMB — lance dive (pierces buildings).  RMB — ECLIPSE at full hunger.  ESC — menu."
+		_:
+			help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / evolved skill.  R — restart.  ESC — menu."
 
 func _label(parent: Node, p: Vector2, sz: int, col: Color) -> Label:
 	var l := Label.new()
@@ -839,12 +1016,25 @@ func _hud_update() -> void:
 	hud.hp.size.x = 152.0 * maxf(0.0, hp) / 100.0
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
-	if bio_stage >= BIO_THRESH.size():
-		hud.bio.size.x = 152.0
-		hud.biolbl.text = "BIOMASS — MAX"
-	else:
-		var lo: float = 0.0 if bio_stage == 0 else BIO_THRESH[bio_stage - 1]
-		hud.bio.size.x = 152.0 * clampf((bio - lo) / (BIO_THRESH[bio_stage] - lo), 0.0, 1.0)
+	match character:
+		"keraunos":
+			hud.biolbl.text = "STORM — RMB TEMPEST at full" if bio < 100.0 else "STORM READY — RMB"
+			hud.bio.size.x = 152.0 * clampf(bio / 100.0, 0.0, 1.0)
+		"tzitzimitl":
+			if eclipse_t > 0.0:
+				hud.biolbl.text = "E C L I P S E"
+				hud.bio.size.x = 152.0 * eclipse_t / 10.0
+			else:
+				hud.biolbl.text = "SUN-HUNGER — RMB ECLIPSE at full" if bio < 80.0 else "ECLIPSE READY — RMB"
+				hud.bio.size.x = 152.0 * clampf(bio / 80.0, 0.0, 1.0)
+		_:
+			if bio_stage >= BIO_THRESH.size():
+				hud.bio.size.x = 152.0
+				hud.biolbl.text = "BIOMASS — MAX"
+			else:
+				hud.biolbl.text = "BIOMASS"
+				var lo: float = 0.0 if bio_stage == 0 else BIO_THRESH[bio_stage - 1]
+				hud.bio.size.x = 152.0 * clampf((bio - lo) / (BIO_THRESH[bio_stage] - lo), 0.0, 1.0)
 
 # ================= render =================
 func _draw() -> void:
@@ -859,8 +1049,21 @@ func _draw() -> void:
 		_draw_building(b)
 	_draw_street(left, right)
 	_draw_actors()
-	_draw_swarm()
-	_draw_tendrils()
+	match character:
+		"keraunos":
+			_draw_keraunos()
+		"tzitzimitl":
+			_draw_tzitzi()
+		_:
+			_draw_swarm()
+			_draw_tendrils()
+	# eclipse: darkness swallows the city
+	if eclipse_t > 0.0:
+		var ea: float = clampf(eclipse_t / 1.5, 0.0, 1.0) * 0.55
+		draw_rect(Rect2(left, -380, right - left, 780), Color(0.01, 0.0, 0.03, ea))
+		var moon := Vector2(cam.position.x + 140, -250.0)
+		draw_circle(moon, 24, Color(0.02, 0.0, 0.03))
+		draw_circle(moon, 26, Color(1.8, 0.9, 0.3, 0.35))
 	for p in pops:
 		var a2: float = clampf(p.life, 0.0, 1.0)
 		draw_string(ThemeDB.fallback_font, p.pos, p.txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
@@ -1110,6 +1313,88 @@ func _draw_tendrils() -> void:
 			draw_circle(prev, 1.8, Color(2.0, 0.5, 0.45))
 		if chewing and randf() < 0.4:
 			draw_circle(prev, 3.2, Color(1.8, 0.6, 0.4, 0.5))
+
+func _draw_keraunos() -> void:
+	# crosshair
+	draw_circle(aim, 2.0, Color(0.6, 1.6, 2.0, 0.7))
+	draw_arc(aim, 5.0, 0, TAU, 12, Color(0.6, 1.6, 2.0, 0.4), 1.0)
+	# bolts
+	for b2 in bolts:
+		var a: float = b2.t_left / 0.16
+		var prev: Vector2 = b2.from
+		var segs_n := 7
+		for i in range(1, segs_n + 1):
+			var f := float(i) / segs_n
+			var npt: Vector2 = b2.from.lerp(b2.to, f) + Vector2(randf_range(-9, 9) * (1.0 - f), 0)
+			draw_line(prev, npt, Color(1.6, 2.0, 2.6, a), 2.5)
+			draw_line(prev, npt, Color(0.7, 1.2, 2.2, a * 0.5), 5.0)
+			prev = npt
+	# storm cloud body
+	for i in 5:
+		var off := Vector2(sin(t * 1.3 + i * 2.2) * 8.0, cos(t * 1.7 + i) * 3.0)
+		draw_circle(pos + off + Vector2(i * 6 - 12, 0), 9.0, Color(0.09, 0.1, 0.16))
+	draw_circle(pos + Vector2(0, -3), 10.0, Color(0.12, 0.13, 0.2))
+	# three necks + heads, leaning toward the cursor
+	var lean := (aim - pos).normalized() * 10.0
+	for h in 3:
+		var root := pos + Vector2((h - 1) * 9.0, -4)
+		var head := root + Vector2((h - 1) * 13.0, -16) + lean + Vector2(sin(t * 3.0 + h * 2.1) * 3.0, 0)
+		var prev := root
+		for i in range(1, 5):
+			var f := float(i) / 4.0
+			var npt := root.lerp(head, f) + Vector2(sin(f * 6.0 + t * 5.0 + h) * 2.5, 0)
+			draw_line(prev, npt, Color(0.14, 0.15, 0.24), 3.0 * (1.0 - f) + 1.5)
+			prev = npt
+		draw_circle(head, 3.0, Color(0.16, 0.18, 0.28))
+		draw_circle(head + lean.normalized() * 1.5, 1.2, Color(0.9, 1.9, 2.4))
+		if randf() < 0.05:
+			var sp := head + Vector2(randf_range(-6, 6), randf_range(-6, 6))
+			draw_line(head, sp, Color(1.4, 1.9, 2.4, 0.8), 1.0)
+	# charge pips
+	for i in 3:
+		var lit: bool = bolt_charges >= i + 1
+		draw_circle(pos + Vector2(i * 6 - 6, 12), 1.6,
+			Color(0.8, 1.8, 2.2) if lit else Color(0.15, 0.2, 0.3))
+
+func _draw_tzitzi() -> void:
+	# crosshair
+	draw_circle(aim, 2.0, Color(1.8, 1.2, 0.4, 0.7))
+	draw_arc(aim, 5.0, 0, TAU, 12, Color(1.8, 1.2, 0.4, 0.4), 1.0)
+	var glow := eclipse_t > 0.0
+	# body: tapering segments, gold-crested
+	for i in range(segs.size() - 1, -1, -1):
+		var f := 1.0 - float(i) / segs.size()
+		var r: float = 2.0 + f * 5.0
+		var p: Vector2 = segs[i]
+		var body_c := Color(0.3, 0.08, 0.1) if i % 2 == 0 else Color(0.38, 0.12, 0.08)
+		if glow:
+			body_c = body_c.lightened(0.15)
+		draw_circle(p, r, body_c)
+		# feather fins every 3rd segment
+		if i % 3 == 0 and i > 1 and (segs[i - 1] - p).length() > 0.8:
+			var along: Vector2 = (segs[i - 1] - p).normalized()
+			var dirv: Vector2 = along.orthogonal()
+			var fin_c := Color(1.7, 1.1, 0.3) if glow else Color(0.9, 0.55, 0.2)
+			var tip_len: float = r + 4.0 + f * 3.0
+			draw_colored_polygon(PackedVector2Array(
+				[p + along * 2.5 + dirv * r * 0.5, p + dirv * tip_len, p - along * 2.5 + dirv * r * 0.5]), fin_c)
+			draw_colored_polygon(PackedVector2Array(
+				[p + along * 2.5 - dirv * r * 0.5, p - dirv * tip_len, p - along * 2.5 - dirv * r * 0.5]), fin_c)
+	# head
+	var hd := pos
+	var hdir := (aim - pos).normalized()
+	draw_circle(hd, 7.5, Color(0.42, 0.13, 0.1))
+	draw_circle(hd + hdir * 3.0, 4.5, Color(0.5, 0.18, 0.12))
+	# gold crest
+	draw_colored_polygon(PackedVector2Array([hd + Vector2(-2, -6), hd + Vector2(2, -13), hd + Vector2(4, -6)]),
+		Color(1.9, 1.3, 0.4))
+	draw_colored_polygon(PackedVector2Array([hd + Vector2(-6, -4), hd + Vector2(-4, -11), hd + Vector2(0, -5)]),
+		Color(1.5, 0.9, 0.3))
+	draw_circle(hd + hdir * 4.5, 1.4, Color(2.2, 1.8, 1.0))
+	if dive_t > 0.0:
+		for i in 4:
+			var tp := hd - dive_dir * (i * 8.0 + 6.0) + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+			draw_line(tp, tp - dive_dir * 6.0, Color(1.8, 1.0, 0.4, 0.5 - i * 0.1), 1.5)
 
 func _draw_swarm() -> void:
 	if pos.y > -120:
