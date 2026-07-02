@@ -10,13 +10,19 @@ const TIER_MULT := [1.0, 1.0, 1.5, 2.0, 3.0, 5.0]
 const CITY_DEFS := {
 	"kowloon": {"name": "NEW KOWLOON", "tint": Color(1, 1, 1), "defense": 1.0,
 		"sky": [Color("#0a0d1f"), Color("#1a1440"), Color("#3d1a52"), Color("#7a2244"), Color("#b03840")],
-		"big_chance": 0.28, "gap_min": 14.0, "gap_max": 48.0, "spawn_mult": 1.0},
-	"thornspire": {"name": "THORNSPIRE", "tint": Color(0.72, 0.72, 1.0), "defense": 1.35,
-		"sky": [Color("#05070f"), Color("#0d1230"), Color("#1e1848"), Color("#3a2a5c"), Color("#5c4a80")],
-		"big_chance": 0.55, "gap_min": 8.0, "gap_max": 26.0, "spawn_mult": 1.0},
-	"ashport": {"name": "ASHPORT", "tint": Color(1.05, 0.88, 0.72), "defense": 0.75,
-		"sky": [Color("#140d0a"), Color("#2e1a10"), Color("#54301a"), Color("#7a4a20"), Color("#9a6228")],
-		"big_chance": 0.10, "gap_min": 24.0, "gap_max": 70.0, "spawn_mult": 1.7},
+		"big_chance": 0.28, "gap_min": 14.0, "gap_max": 48.0, "spawn_mult": 1.0,
+		"moon": Color(1.55, 0.35, 0.3), "moon_r": 20.0, "lamp": Color(1.9, 1.5, 0.9),
+		"aurora": false, "smog": false, "street": Color("#383050")},
+	"thornspire": {"name": "THORNSPIRE", "tint": Color(0.85, 0.9, 1.35), "defense": 1.35,
+		"sky": [Color("#020308"), Color("#070c22"), Color("#101a40"), Color("#1c2c58"), Color("#2a4470")],
+		"big_chance": 0.55, "gap_min": 8.0, "gap_max": 26.0, "spawn_mult": 1.0,
+		"moon": Color(1.6, 1.7, 2.0), "moon_r": 30.0, "lamp": Color(1.2, 1.7, 2.0),
+		"aurora": true, "smog": false, "street": Color("#2a3450")},
+	"ashport": {"name": "ASHPORT", "tint": Color(1.18, 0.82, 0.5), "defense": 0.75,
+		"sky": [Color("#0f0a06"), Color("#241408"), Color("#42250c"), Color("#663a10"), Color("#8a5416")],
+		"big_chance": 0.10, "gap_min": 24.0, "gap_max": 70.0, "spawn_mult": 1.7,
+		"moon": Color(1.3, 0.7, 0.25), "moon_r": 13.0, "lamp": Color(1.9, 1.1, 0.4),
+		"aurora": false, "smog": true, "street": Color("#403020")},
 }
 const END_TEXT := {
 	"swarm": {"win": "CITY RAZED", "win_s": "the swarm moves on, fat with light and marrow.",
@@ -52,6 +58,7 @@ var parts: Array = []
 var pops: Array = []
 var people: Array = []
 var cars: Array = []
+var lamps: Array = []            # destructible street lights {x, dead}
 var spawn_cd := 3.0
 
 var facades: Array = []     # sliced Images from the sheet
@@ -81,11 +88,20 @@ func _ready() -> void:
 	cam.position = Vector2(pos.x, -100)
 	add_child(cam)
 	cam.make_current()
-	if character == "keraunos":
-		cam.zoom = Vector2(0.62, 0.62)   # pull back — he is COLOSSAL
-		radius = 42.0
-		dmg_taken_mult = 0.75
-		pos.y = -170.0
+	match character:
+		"keraunos":
+			cam.zoom = Vector2(0.55, 0.55)   # pull back — he is COLOSSAL
+			radius = 52.0
+			dmg_taken_mult = 0.7
+			pos.y = -190.0
+		"tzitzimitl":
+			cam.zoom = Vector2(0.78, 0.78)
+			radius = 16.0
+		"swarm":
+			cam.zoom = Vector2(0.85, 0.85)
+			radius = 22.0
+			for i in 40:
+				motes.append({"a": randf() * TAU, "d": randf_range(0.15, 1.0), "s": randf_range(0.8, 3.0), "o": randf() * TAU})
 	swarm_light = PointLight2D.new()
 	swarm_light.texture = _radial_tex(128)
 	swarm_light.color = Color(1.0, 0.25, 0.3)
@@ -221,8 +237,12 @@ func _build_city() -> void:
 	for b in buildings:
 		total_mass += b.maxhp
 	for k in 26:
-		cars.append({"x": randf_range(300, WORLD_W - 400), "w": randf_range(14, 19),
+		cars.append({"x": randf_range(300, WORLD_W - 400), "w": randf_range(14, 19), "dead": false,
 			"col": [Color("#20303a"), Color("#3a2030"), Color("#2a2a34"), Color("#1c2426")][randi() % 4]})
+	var lamp_x := 320.0
+	while lamp_x < WORLD_W - 300.0:
+		lamps.append({"x": lamp_x, "dead": false})
+		lamp_x += randf_range(80, 120)
 	for k in 70:
 		people.append({"pos": Vector2(randf_range(320, WORLD_W - 350), 0), "vx": 0.0, "panic": false,
 			"o": randf() * TAU, "col": Color(randf_range(0.4, 0.7), randf_range(0.4, 0.6), randf_range(0.5, 0.75))})
@@ -370,6 +390,8 @@ func _people(delta: float) -> void:
 		var d: float = pos.x - p.pos.x
 		if absf(d) < 90.0 and pos.y > -60.0:
 			p.panic = true
+		if eclipse_t > 0.0:
+			p.panic = true   # the sun is gone — everyone runs
 		if p.panic:
 			p.vx = move_toward(p.vx, -signf(d) * 46.0, 200.0 * delta)
 		else:
@@ -591,31 +613,45 @@ func _keraunos(delta: float) -> void:
 			if best != null:
 				o.pos.x = move_toward(o.pos.x, best.x + best.w * 0.5, 22.0 * delta)
 		if o.zap <= 0.0:
-			o.zap = 0.5
-			var zapped := false
+			o.zap = randf_range(0.35, 1.3)   # erratic — lightning has moods
+			# gather everything in reach, lash out at ONE random victim
+			var cands: Array = []
 			for u in units:
-				if (u.pos + Vector2(0, -8)).distance_to(o.pos) < 44.0:
-					u.hp = u.get("hp", 1) - 1
-					bolts.append({"from": o.pos, "to": u.pos + Vector2(0, -8), "t_left": 0.1})
-					if u.hp <= 0:
-						u.dead = true
-						_kill_unit(u)
-					zapped = true
+				if (u.pos + Vector2(0, -8)).distance_to(o.pos) < 50.0:
+					cands.append(u)
+			var b_cand = null
+			for b in buildings:
+				if b.dead or b.dying > 0.0:
+					continue
+				if o.pos.x >= b.x - 24 and o.pos.x <= b.x + b.w + 24:
+					b_cand = b
 					break
-			if not zapped:
-				for b in buildings:
-					if b.dead or b.dying > 0.0:
-						continue
-					if o.pos.x >= b.x - 20 and o.pos.x <= b.x + b.w + 20:
-						var hit := Vector2(clampf(o.pos.x, b.x + 4, b.x + b.w - 4),
-							clampf(o.pos.y, -b.cur_h + 4, -6.0))
-						_carve(b, hit, 4.0)
-						b.hp -= 6.0
-						score_f += 6.0 * combo * TIER_MULT[tier]
-						bolts.append({"from": o.pos, "to": hit, "t_left": 0.1})
-						if b.hp <= 0.0:
-							b.dying = 0.6
-						break
+			if b_cand != null:
+				cands.append(b_cand)
+			for l in lamps:
+				if not l.dead and absf(l.x - o.pos.x) < 50.0:
+					cands.append(l)
+					break
+			if not cands.is_empty():
+				var pick = cands[randi() % cands.size()]
+				if pick is Dictionary and pick.has("kind"):
+					pick.hp = pick.get("hp", 1) - 1
+					bolts.append({"from": o.pos, "to": pick.pos + Vector2(0, -8), "t_left": 0.1})
+					if pick.hp <= 0:
+						pick.dead = true
+						_kill_unit(pick)
+				elif pick is Dictionary and pick.has("maxhp"):
+					var hit := Vector2(clampf(o.pos.x, pick.x + 4, pick.x + pick.w - 4),
+						clampf(o.pos.y, -pick.cur_h + 4, -6.0))
+					_carve(pick, hit, 5.0)
+					pick.hp -= 8.0
+					score_f += 8.0 * combo * TIER_MULT[tier]
+					bolts.append({"from": o.pos, "to": hit, "t_left": 0.1})
+					if pick.hp <= 0.0:
+						pick.dying = 0.6
+				elif pick is Dictionary and pick.has("x"):
+					bolts.append({"from": o.pos, "to": Vector2(pick.x, -24), "t_left": 0.1})
+					_hit_props(Vector2(pick.x, -20), 6.0)
 		# resonance: orbs arc to each other
 		if nodes.has("resonance"):
 			for o2 in orbs:
@@ -714,6 +750,7 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 			bio += 2.0
 			meter = minf(100.0, meter + 2.0)
 			_mist(Vector2(pe.pos.x, -5))
+	_hit_props(p, 26.0 * power)
 
 func _skyfall(p: Vector2) -> void:
 	# charged mega-bolt: deletes a vertical slice of whatever it hits
@@ -742,6 +779,7 @@ func _skyfall(p: Vector2) -> void:
 			u.dead = true
 			_kill_unit(u)
 	units = units.filter(func(u): return not u.get("dead", false))
+	_hit_props(Vector2(p.x, -5), w_col)
 	if nodes.has("thunderclap"):
 		stun_t = 2.0
 
@@ -764,9 +802,11 @@ func _tzitzi_move(delta: float) -> void:
 		pos += vel * delta
 	pos.x = clamp(pos.x, 40, WORLD_W - 40)
 	pos.y = clamp(pos.y, -340, -10)
-	segs.push_front(pos)
-	while segs.size() > 16:
-		segs.pop_back()
+	_hit_props(pos, 12.0)   # the serpent's passage devours light and crushes steel
+	if segs.is_empty() or segs[0].distance_to(pos) > 3.0:
+		segs.push_front(pos)
+		while segs.size() > 44:
+			segs.pop_back()
 
 func _tzitzi(delta: float) -> void:
 	if eclipse_t > 0.0:
@@ -866,6 +906,7 @@ func _tzitzi(delta: float) -> void:
 				bio += 2.0
 				meter = minf(100.0, meter + 2.0)
 				_mist(Vector2(pe.pos.x, -5))
+		_hit_props(pos, 18.0)
 	else:
 		# sonic boom: shockwave when the dive ends
 		if nodes.has("sonicboom") and dive_cd > cd_needed - 0.05 and dive_t <= 0.0 and dive_t > -0.05:
@@ -962,20 +1003,45 @@ func _rmb_active() -> void:
 				score_f += 20.0 * combo * TIER_MULT[tier]
 				bio += 2.0
 				_mist(Vector2(p.pos.x, -5))
+		for k in 3:
+			_hit_props(pos + Vector2.from_angle(lash.ang + (k - 1) * 0.5) * hit_r * 0.8, 12.0)
 		for b in buildings:
 			if b.dead or b.dying > 0.0:
 				continue
 			for k in 3:
 				var probe: Vector2 = pos + Vector2.from_angle(lash.ang + (k - 1) * 0.5) * hit_r * 0.8
 				if probe.x >= b.x and probe.x <= b.x + b.w and probe.y >= -b.cur_h and probe.y <= 0.0:
-					_carve(b, probe, 6.0)
-					b.hp -= 6.0
+					_carve(b, probe, 8.0)
+					b.hp -= 8.0
 					score_f += 8.0 * combo * TIER_MULT[tier]
 					bio += 3.0
 					if b.hp <= 0.0:
 						b.dying = 0.6
 		shake = maxf(shake, 4.0)
 		combo_idle = 0.0
+
+func _hit_props(p: Vector2, r: float) -> void:
+	# lamps and cars are destructible — everything is
+	for l in lamps:
+		if l.dead or absf(l.x - p.x) > r or p.y < -34.0:
+			continue
+		l.dead = true
+		score_f += 15.0 * combo * TIER_MULT[tier]
+		_boom(Vector2(l.x, -24), 8, Color(2.0, 1.7, 0.9), 80.0)
+		if character == "tzitzimitl":
+			meter = minf(100.0, meter + 10.0)   # light devoured
+			_pop(Vector2(l.x, -30), "LIGHT DEVOURED", Color(1.9, 1.4, 0.5))
+	for c in cars:
+		if c.dead or absf(c.x + c.w * 0.5 - p.x) > r + c.w * 0.5 or p.y < -20.0:
+			continue
+		c.dead = true
+		score_f += 40.0 * combo * TIER_MULT[tier]
+		bio += 3.0
+		_explode(Vector2(c.x + c.w * 0.5, -5), "car")
+		for b in buildings:
+			if not b.dead and b.dying <= 0.0 and c.x + c.w * 0.5 >= b.x and c.x <= b.x + b.w:
+				b.burn += 0.8
+				break
 
 func _shockwave(p: Vector2, r: float) -> void:
 	parts.append({"pos": p, "vel": Vector2.ZERO, "life": 0.2, "col": Color(1.8, 1.4, 0.8), "flash": true, "size": r * 0.5})
@@ -995,15 +1061,20 @@ func _chew(b: Dictionary, delta: float) -> void:
 	score_f += bite * 1.6 * combo * TIER_MULT[tier]
 	bio += bite * 0.5
 	if bite_cd <= 0.0:
-		bite_cd = 0.22 if maul else 0.13
+		# slower, heavier bites — each one tears a real wound
+		bite_cd = 0.42 if maul else 0.32
 		_sfx("bite")
-		combo = min(9.5, combo + 0.06)
-		var r1: float = randf_range(4.0, 8.0) * (2.0 if maul else 1.0)
+		combo = min(9.5, combo + 0.12)
+		var r1: float = randf_range(9.0, 14.0) * (1.6 if maul else 1.0)
 		_carve(b, aim, r1)
-		_carve(b, aim + Vector2(randf_range(-5, 5), randf_range(-5, 5)), r1 * 0.6)
+		_carve(b, aim + Vector2(randf_range(-7, 7), randf_range(-7, 7)), r1 * 0.65)
+		_carve(b, aim + Vector2(randf_range(-9, 9), randf_range(-4, 10)), r1 * 0.4)
+		b.hp -= 9.0 * (1.6 if maul else 1.0)
 		b.holes.append({"p": aim - Vector2(b.x, -b.h), "o": randf() * TAU})
-		_boom(aim, 5 if maul else 3, Color("#7a6a7a"), 90.0 if maul else 70.0)
-		_chunks(aim, 4 if maul else 2)
+		_boom(aim, 9 if maul else 6, Color("#7a6a7a"), 110.0 if maul else 90.0)
+		_chunks(aim, 7 if maul else 5)
+		shake = maxf(shake, 5.0 if maul else 3.0)
+		_hit_props(aim, 14.0)
 		if maul:
 			shake = maxf(shake, 4.0)
 			_shockwave(aim, 30.0)
@@ -1197,7 +1268,7 @@ func _army(delta: float) -> void:
 	var defense: float = city_def.defense
 	spawn_cd -= delta
 	var cap: int = int((2 + tier * 3) * city_def.spawn_mult)
-	if tier >= 1 and spawn_cd <= 0.0 and units.size() < cap and stun_t <= 0.0:
+	if tier >= 1 and spawn_cd <= 0.0 and units.size() < cap and stun_t <= 0.0 and eclipse_t <= 0.0:
 		spawn_cd = maxf(0.3, (1.4 - tier * 0.18) / city_def.spawn_mult)
 		var side: float = -1.0 if randf() < 0.5 else 1.0
 		var x: float = pos.x + side * randf_range(360, 560)
@@ -1277,6 +1348,7 @@ func _army(delta: float) -> void:
 			_boom(Vector2(s.pos.x, -2), 14, Color(2.0, 1.2, 0.5), 90.0)
 			_sfx("boom")
 			shake = maxf(shake, 5.0)
+			_hit_props(Vector2(s.pos.x, -4), 22.0)
 			if Vector2(s.pos.x, -6).distance_to(pos) < 34.0:
 				hp -= 9.0 * dmg_taken_mult * defense
 				hit_flash = 1.0
@@ -1328,8 +1400,11 @@ func _boom(p: Vector2, n: int, col: Color, sp: float) -> void:
 			"life": randf_range(0.3, 0.9), "col": col})
 
 func _fire(p: Vector2) -> void:
-	parts.append({"pos": p, "vel": Vector2(randf_range(-6, 6), randf_range(-34, -18)),
-		"life": randf_range(0.3, 0.7), "col": Color(2.2, 1.1, 0.4) if randf() < 0.7 else Color(2.5, 1.9, 0.6), "fire": true})
+	parts.append({"pos": p, "vel": Vector2(randf_range(-4, 4), randf_range(-26, -12)),
+		"life": randf_range(0.4, 0.9), "col": Color(2.2, 1.1, 0.4), "fire": true})
+	if randf() < 0.35:
+		parts.append({"pos": p + Vector2(0, -3), "vel": Vector2(randf_range(-5, 5), randf_range(-30, -16)),
+			"life": randf_range(0.8, 1.6), "col": Color(0.2, 0.18, 0.2), "fire": true, "smoke": true, "size": 3.0})
 
 func _pop(p: Vector2, txt: String, col: Color) -> void:
 	pops.append({"pos": p, "txt": txt, "col": col, "life": 1.1})
@@ -1438,6 +1513,14 @@ func _draw() -> void:
 			continue
 		_draw_building(b)
 	_draw_street(left, right)
+	# eclipse gloom sits UNDER the living things — fires, beasts and armies stay vivid
+	var dark_a: float = maxf(clampf(eclipse_t / 1.5, 0.0, 1.0) * 0.5, dark_perm)
+	if dark_a > 0.0:
+		draw_rect(Rect2(left, -380, right - left, 780), Color(0.01, 0.0, 0.03, dark_a))
+		if eclipse_t > 0.0:
+			var moon2 := Vector2(cam.position.x + 140, -250.0)
+			draw_circle(moon2, city_def.moon_r + 4.0, Color(0.02, 0.0, 0.03))
+			draw_circle(moon2, city_def.moon_r + 6.0, Color(1.8, 0.9, 0.3, 0.35))
 	_draw_actors()
 	match character:
 		"keraunos":
@@ -1447,14 +1530,6 @@ func _draw() -> void:
 		_:
 			_draw_swarm()
 			_draw_tendrils()
-	# eclipse / permanent gloom: darkness swallows the city
-	var dark_a: float = maxf(clampf(eclipse_t / 1.5, 0.0, 1.0) * 0.55, dark_perm)
-	if dark_a > 0.0:
-		draw_rect(Rect2(left, -380, right - left, 780), Color(0.01, 0.0, 0.03, dark_a))
-		if eclipse_t > 0.0:
-			var moon := Vector2(cam.position.x + 140, -250.0)
-			draw_circle(moon, 24, Color(0.02, 0.0, 0.03))
-			draw_circle(moon, 26, Color(1.8, 0.9, 0.3, 0.35))
 	# hanging razor feathers
 	for f2 in feathers:
 		var fd := Vector2(sin(t * 3.0 + f2.pos.x), 1.0).normalized()
@@ -1495,13 +1570,30 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 		var syr := -378.0 + _hash(i * 9.1) * 190.0
 		if fmod(t * (0.4 + fmod(float(i), 3.0) * 0.3) + i, 2.0) < 1.5:
 			draw_rect(Rect2(sxr, syr, 1, 1), Color(0.9, 0.92, 1.0, 0.5 * (1.0 - (syr + 378.0) / 200.0)))
-	# blood moon (HDR — blooms)
+	# city aurora / smog signatures
+	if city_def.aurora:
+		for i in 3:
+			var ay: float = -330.0 + i * 26.0
+			var pts := PackedVector2Array()
+			var xx := left
+			while xx <= right:
+				pts.append(Vector2(xx, ay + sin(xx * 0.012 + t * 0.5 + i * 2.0) * 14.0))
+				xx += 40.0
+			for j in pts.size() - 1:
+				draw_line(pts[j], pts[j + 1], Color(0.3, 1.2, 0.8, 0.10 - i * 0.02), 10.0 - i * 2.0)
+	if city_def.smog:
+		for i in 4:
+			draw_rect(Rect2(left, -180.0 + i * 34.0 + sin(t * 0.3 + i) * 6.0, right - left, 16.0),
+				Color(0.28, 0.2, 0.12, 0.13))
+	# the moon — each city under a different witness
+	var mc: Color = city_def.moon
+	var mr: float = city_def.moon_r
 	var moon := Vector2(cx + 140, -250.0)
-	draw_circle(moon, 26, Color(0.6, 0.08, 0.1, 0.35))
-	draw_circle(moon, 20, Color(1.55, 0.35, 0.3))
-	draw_circle(moon + Vector2(-5, -4), 16, Color(1.7, 0.45, 0.38))
-	draw_circle(moon + Vector2(6, 5), 4, Color(1.2, 0.25, 0.22))
-	draw_circle(moon + Vector2(-9, 7), 2.5, Color(1.2, 0.25, 0.22))
+	draw_circle(moon, mr * 1.3, Color(mc.r * 0.4, mc.g * 0.25, mc.b * 0.25, 0.35))
+	draw_circle(moon, mr, mc)
+	draw_circle(moon + Vector2(-mr * 0.25, -mr * 0.2), mr * 0.8, mc.lightened(0.1))
+	draw_circle(moon + Vector2(mr * 0.3, mr * 0.25), mr * 0.2, mc.darkened(0.2))
+	draw_circle(moon + Vector2(-mr * 0.45, mr * 0.35), mr * 0.13, mc.darkened(0.2))
 
 func _draw_backdrop(left: float, right: float, cx: float) -> void:
 	# city glow band on the horizon (blooms slightly)
@@ -1544,7 +1636,12 @@ func _draw_building(b: Dictionary) -> void:
 	var img_h: float = b.img.get_height()
 	var vis_frac: float = b.cur_h / b.h
 	var src := Rect2(0, img_h * (1.0 - vis_frac), b.img.get_width(), img_h * vis_frac)
-	draw_texture_rect_region(b.tex, Rect2(b.x, -b.cur_h, b.w, b.cur_h), src, city_def.tint)
+	var tint: Color = city_def.tint
+	if eclipse_t > 0.0:
+		tint = tint * Color(0.2, 0.18, 0.28)   # the serpent ate the light — windows die
+	elif dark_perm > 0.0:
+		tint = tint * Color(0.55, 0.5, 0.65)
+	draw_texture_rect_region(b.tex, Rect2(b.x, -b.cur_h, b.w, b.cur_h), src, tint)
 	if b.burn > 0.5:
 		draw_rect(Rect2(b.x, -b.cur_h, b.w, b.cur_h), Color(1.0, 0.4, 0.15, minf(0.18, b.burn * 0.03)))
 	# spore pods pulsing in wounds
@@ -1575,33 +1672,51 @@ func _draw_building(b: Dictionary) -> void:
 		draw_rect(Rect2(b.x, -b.cur_h - 3, b.w * minf(1.0, dmg * 1.15), 2), Color(1.6, 0.4, 0.25, 0.9))
 
 func _draw_street(left: float, right: float) -> void:
-	draw_rect(Rect2(left, 0, right - left, 2), Color("#383050"))
+	var lights_out: bool = eclipse_t > 0.0
+	draw_rect(Rect2(left, 0, right - left, 2), city_def.street)
 	draw_rect(Rect2(left, 2, right - left, 6), Color("#1c1830"))
 	draw_rect(Rect2(left, 8, right - left, 400), Color("#100c1e"))
 	var rx := left - fposmod(left, 26.0)
 	while rx < right:
 		draw_rect(Rect2(rx, 4, 10, 1), Color(0.8, 0.8, 1.0, 0.10))
 		rx += 26.0
-	# street lamps with pooled light
-	var lx := left - fposmod(left, 96.0)
-	while lx < right:
-		draw_rect(Rect2(lx, -26, 1, 26), Color("#201830"))
-		draw_rect(Rect2(lx - 2, -27, 5, 2), Color("#201830"))
-		draw_circle(Vector2(lx + 0.5, -24), 2.2, Color(1.9, 1.5, 0.9))
-		draw_circle(Vector2(lx + 0.5, -24), 6.0, Color(1.2, 0.95, 0.6, 0.12))
+	# street lamps — destructible, dead during eclipse
+	var lamp_c: Color = city_def.lamp
+	for l in lamps:
+		if l.x < left or l.x > right:
+			continue
+		draw_rect(Rect2(l.x, -26, 1, 26), Color("#201830"))
+		draw_rect(Rect2(l.x - 2, -27, 5, 2), Color("#201830"))
+		if l.dead:
+			draw_line(Vector2(l.x - 2, -27), Vector2(l.x + 4, -23), Color("#141020"), 2)
+			if randf() < 0.02:
+				draw_line(Vector2(l.x, -25), Vector2(l.x + randf_range(-3, 3), -21), Color(1.6, 1.8, 2.2, 0.8), 1)
+			continue
+		if lights_out:
+			draw_circle(Vector2(l.x + 0.5, -24), 2.2, Color(0.1, 0.09, 0.14))
+			continue
+		draw_circle(Vector2(l.x + 0.5, -24), 2.2, lamp_c)
+		draw_circle(Vector2(l.x + 0.5, -24), 6.0, Color(lamp_c.r, lamp_c.g, lamp_c.b, 0.12))
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(lx - 1, -24), Vector2(lx + 2, -24), Vector2(lx + 10, 0), Vector2(lx - 9, 0)]),
-			Color(1.0, 0.85, 0.5, 0.05))
-		draw_rect(Rect2(lx - 9, -1, 19, 2), Color(1.0, 0.85, 0.5, 0.09))
-		lx += 96.0
+			Vector2(l.x - 1, -24), Vector2(l.x + 2, -24), Vector2(l.x + 10, 0), Vector2(l.x - 9, 0)]),
+			Color(lamp_c.r * 0.55, lamp_c.g * 0.55, lamp_c.b * 0.55, 0.05))
+		draw_rect(Rect2(l.x - 9, -1, 19, 2), Color(lamp_c.r * 0.55, lamp_c.g * 0.55, lamp_c.b * 0.55, 0.09))
+	# cars — destructible
 	for c in cars:
 		if c.x < left or c.x > right:
+			continue
+		if c.dead:
+			draw_rect(Rect2(c.x + 1, -4, c.w - 2, 3), Color("#0e0a10"))
+			draw_rect(Rect2(c.x + 4, -6, c.w - 9, 2), Color("#141018"))
+			if randf() < 0.06:
+				_fire(Vector2(c.x + randf() * c.w, -5))
 			continue
 		draw_rect(Rect2(c.x, -5, c.w, 4), c.col)
 		draw_rect(Rect2(c.x + 3, -8, c.w - 7, 3), c.col.darkened(0.2))
 		draw_rect(Rect2(c.x + 1, -1, 3, 1), Color("#08060c"))
 		draw_rect(Rect2(c.x + c.w - 4, -1, 3, 1), Color("#08060c"))
-		draw_rect(Rect2(c.x + c.w - 1, -4, 1, 2), Color(1.6, 0.5, 0.3, 0.8))
+		if not lights_out:
+			draw_rect(Rect2(c.x + c.w - 1, -4, 1, 2), Color(1.6, 0.5, 0.3, 0.8))
 
 func _draw_actors() -> void:
 	for p in people:
@@ -1663,6 +1778,19 @@ func _draw_actors() -> void:
 		var a: float = clampf(p.life * 2.5, 0.0, 1.0)
 		if p.get("flash", false):
 			draw_circle(p.pos, p.size * (1.0 + (0.22 - p.life) * 8.0), Color(p.col.r, p.col.g, p.col.b, a * 0.7))
+		elif p.get("fire", false) and not p.get("smoke", false):
+			# real flame: glow + tongue that flickers and tapers as it dies
+			var fl: float = p.life
+			var flick: float = sin(t * 23.0 + p.pos.x * 3.0) * 1.2
+			draw_circle(p.pos + Vector2(1, 0), 3.5 * fl + 1.0, Color(1.2, 0.45, 0.1, 0.16 * a))
+			draw_colored_polygon(PackedVector2Array([
+				p.pos + Vector2(-1.8, 1.5), p.pos + Vector2(flick * 0.5, -4.5 * fl - 1.5),
+				p.pos + Vector2(1.8, 1.5)]), Color(1.9, 0.75, 0.15, a))
+			draw_colored_polygon(PackedVector2Array([
+				p.pos + Vector2(-0.9, 1.0), p.pos + Vector2(flick * 0.4, -2.6 * fl - 0.8),
+				p.pos + Vector2(0.9, 1.0)]), Color(2.3, 1.6, 0.5, a))
+		elif p.get("smoke", false):
+			draw_circle(p.pos, p.get("size", 2.0) * (1.6 - p.life * 0.5), Color(0.16, 0.14, 0.16, a * 0.35))
 		else:
 			var sz: float = p.get("size", 2.0)
 			draw_rect(Rect2(p.pos.x, p.pos.y, sz, sz), Color(p.col.r, p.col.g, p.col.b, a))
@@ -1750,7 +1878,8 @@ func _draw_keraunos() -> void:
 			draw_line(prev, npt, Color(1.6, 2.0, 2.6, a), 2.5)
 			draw_line(prev, npt, Color(0.7, 1.2, 2.2, a * 0.5), 5.0)
 			prev = npt
-	# ===== the colossus: Ghidorah-scale storm hydra =====
+	# ===== the colossus: Ghidorah-scale storm hydra (1.5x transform) =====
+	draw_set_transform(-0.5 * pos, 0.0, Vector2(1.5, 1.5))
 	var facing: float = signf(aim.x - pos.x)
 	if facing == 0.0:
 		facing = 1.0
@@ -1831,46 +1960,106 @@ func _draw_keraunos() -> void:
 		var lit: bool = bolt_charges >= i + 1
 		draw_circle(pos + Vector2(i * 7 - (bolt_max - 1.0) * 3.5, 34), 2.0,
 			Color(0.8, 1.8, 2.2) if lit else Color(0.15, 0.2, 0.3))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func _draw_tzitzi() -> void:
 	# crosshair
 	draw_circle(aim, 2.0, Color(1.8, 1.2, 0.4, 0.7))
 	draw_arc(aim, 5.0, 0, TAU, 12, Color(1.8, 1.2, 0.4, 0.4), 1.0)
 	var glow := eclipse_t > 0.0
-	# body: tapering segments, gold-crested
-	for i in range(segs.size() - 1, -1, -1):
-		var f := 1.0 - float(i) / segs.size()
-		var r: float = 2.0 + f * 5.0
+	var n := segs.size()
+	if n < 3:
+		return
+	# ===== QUETZALCOATL — long, plumed, majestic =====
+	var emerald := Color(0.07, 0.32, 0.2)
+	var emerald_hi := Color(0.12, 0.5, 0.3)
+	var belly := Color(0.85, 0.68, 0.3)
+	if glow:
+		emerald = emerald.lightened(0.2)
+		emerald_hi = Color(0.3, 1.0, 0.6)
+		belly = Color(1.6, 1.2, 0.5)
+	# dorsal plume feathers first (behind the body) — a mane down the whole spine
+	for i in range(n - 1, 0, -1):
+		if i % 3 != 0:
+			continue
 		var p: Vector2 = segs[i]
-		var body_c := Color(0.3, 0.08, 0.1) if i % 2 == 0 else Color(0.38, 0.12, 0.08)
-		if glow:
-			body_c = body_c.lightened(0.15)
-		draw_circle(p, r, body_c)
-		# feather fins every 3rd segment
-		if i % 3 == 0 and i > 1 and (segs[i - 1] - p).length() > 0.8:
-			var along: Vector2 = (segs[i - 1] - p).normalized()
-			var dirv: Vector2 = along.orthogonal()
-			var fin_c := Color(1.7, 1.1, 0.3) if glow else Color(0.9, 0.55, 0.2)
-			var tip_len: float = r + 4.0 + f * 3.0
-			draw_colored_polygon(PackedVector2Array(
-				[p + along * 2.5 + dirv * r * 0.5, p + dirv * tip_len, p - along * 2.5 + dirv * r * 0.5]), fin_c)
-			draw_colored_polygon(PackedVector2Array(
-				[p + along * 2.5 - dirv * r * 0.5, p - dirv * tip_len, p - along * 2.5 - dirv * r * 0.5]), fin_c)
-	# head
+		var pn: Vector2 = segs[i - 1]
+		if pn.distance_to(p) < 0.5:
+			continue
+		var f := 1.0 - float(i) / n
+		var body_r: float = 3.0 + sin(f * PI) ** 0.7 * 9.0
+		var along := (pn - p).normalized()
+		var up := along.orthogonal()
+		if up.y > 0:
+			up = -up
+		var sway: float = sin(t * 3.0 + i * 0.7) * 0.25
+		var plume_len: float = body_r * (1.8 + sin(f * PI) * 0.8)
+		var base1 := p + along * 2.0
+		var base2 := p - along * 2.0
+		var tip := p + (up + along * sway).normalized() * (body_r + plume_len)
+		draw_colored_polygon(PackedVector2Array([base1 + up * body_r * 0.5, tip, base2 + up * body_r * 0.5]),
+			Color(1.5, 0.35, 0.25) if not glow else Color(2.0, 0.5, 0.3))
+		var tip2 := p + (up + along * (sway + 0.15)).normalized() * (body_r + plume_len * 0.6)
+		draw_colored_polygon(PackedVector2Array([base1 + up * body_r * 0.4, tip2, base2 + up * body_r * 0.4]),
+			Color(1.7, 1.15, 0.3) if not glow else Color(2.2, 1.6, 0.5))
+	# great feathered wings near the head — five blades each, flapping
+	if n > 8:
+		var wing_root: Vector2 = segs[5]
+		var w_along: Vector2 = (segs[3] - segs[7]).normalized()
+		var w_up: Vector2 = w_along.orthogonal()
+		if w_up.y > 0:
+			w_up = -w_up
+		var flap: float = sin(t * 5.0) * 0.5
+		for side in [-1.0, 1.0]:
+			for fb in 5:
+				var fang: float = (-0.5 + fb * 0.22 + flap * 0.4) * side
+				var fdir: Vector2 = (w_up.rotated(fang * 0.9) + w_along * 0.2 * side).normalized()
+				var flen: float = 34.0 - fb * 4.0
+				var w_tip := wing_root + fdir * flen
+				var w_side := fdir.orthogonal() * 3.0
+				var fc := Color(1.6, 1.1, 0.3) if fb % 2 == 0 else Color(0.15, 0.65, 0.4)
+				if glow:
+					fc = fc.lightened(0.3)
+				draw_colored_polygon(PackedVector2Array([wing_root + w_side, w_tip, wing_root - w_side]), fc)
+	# body — tapering coils, emerald scales with gold belly
+	for i in range(n - 1, -1, -1):
+		var f := 1.0 - float(i) / n
+		var r: float = 3.0 + sin(f * PI) ** 0.7 * 9.0
+		var p: Vector2 = segs[i]
+		draw_circle(p, r, emerald if i % 2 == 0 else emerald.darkened(0.15))
+		draw_circle(p + Vector2(0, r * 0.35), r * 0.5, belly)
+		if i % 4 == 0:
+			draw_circle(p + Vector2(0, -r * 0.4), r * 0.35, emerald_hi)
+	# head — crowned, jawed, burning-eyed
 	var hd := pos
 	var hdir := (aim - pos).normalized()
-	draw_circle(hd, 7.5, Color(0.42, 0.13, 0.1))
-	draw_circle(hd + hdir * 3.0, 4.5, Color(0.5, 0.18, 0.12))
-	# gold crest
-	draw_colored_polygon(PackedVector2Array([hd + Vector2(-2, -6), hd + Vector2(2, -13), hd + Vector2(4, -6)]),
-		Color(1.9, 1.3, 0.4))
-	draw_colored_polygon(PackedVector2Array([hd + Vector2(-6, -4), hd + Vector2(-4, -11), hd + Vector2(0, -5)]),
-		Color(1.5, 0.9, 0.3))
-	draw_circle(hd + hdir * 4.5, 1.4, Color(2.2, 1.8, 1.0))
+	var hup := hdir.orthogonal()
+	if hup.y > 0:
+		hup = -hup
+	draw_circle(hd, 10.0, emerald)
+	draw_circle(hd + hdir * 5.0, 7.0, emerald)
+	# open jaw
+	draw_colored_polygon(PackedVector2Array([hd + hdir * 6.0 + hup * 3.0, hd + hdir * 16.0 + hup * 5.0, hd + hdir * 9.0]), emerald_hi)
+	draw_colored_polygon(PackedVector2Array([hd + hdir * 6.0 - hup * 3.0, hd + hdir * 15.0 - hup * 6.0, hd + hdir * 9.0]), emerald.darkened(0.1))
+	draw_circle(hd + hdir * 6.0 + hup * 1.0, 1.5, Color(2.4, 1.9, 1.0))   # fang glint
+	# crest fan — five great feathers arcing back off the skull
+	for fb in 5:
+		var cang: float = 0.5 + fb * 0.3
+		var cdir := (-hdir).rotated((cang - 1.1) * 1.0)
+		var clen: float = 22.0 - absf(fb - 2.0) * 3.0
+		var c_tip := hd + cdir * clen + hup * 6.0
+		var c_side := cdir.orthogonal() * 2.5
+		var cc := Color(1.8, 0.4, 0.3) if fb % 2 == 0 else Color(1.7, 1.2, 0.35)
+		if glow:
+			cc = cc.lightened(0.25)
+		draw_colored_polygon(PackedVector2Array([hd + c_side, c_tip, hd - c_side]), cc)
+	# the eye
+	draw_circle(hd + hdir * 2.0 + hup * 2.5, 2.2, Color(0.05, 0.02, 0.05))
+	draw_circle(hd + hdir * 2.0 + hup * 2.5, 1.2, Color(2.4, 1.4, 0.3))
 	if dive_t > 0.0:
-		for i in 4:
-			var tp := hd - dive_dir * (i * 8.0 + 6.0) + Vector2(randf_range(-3, 3), randf_range(-3, 3))
-			draw_line(tp, tp - dive_dir * 6.0, Color(1.8, 1.0, 0.4, 0.5 - i * 0.1), 1.5)
+		for i in 5:
+			var tp := hd - dive_dir * (i * 10.0 + 8.0) + Vector2(randf_range(-4, 4), randf_range(-4, 4))
+			draw_line(tp, tp - dive_dir * 8.0, Color(1.8, 1.2, 0.4, 0.55 - i * 0.1), 2.0)
 
 func _draw_swarm() -> void:
 	if pos.y > -120:
