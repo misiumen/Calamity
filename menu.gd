@@ -5,7 +5,7 @@ const ROSTER := [
 		"col": Color("#ff4d5a")},
 	{"id": "keraunos", "name": "KERAUNOS", "sub": "colossal storm hydra — banked lightning, TEMPEST barrage",
 		"col": Color("#5ad0ff")},
-	{"id": "tzitzimitl", "name": "TZITZIMITL", "sub": "eclipse serpent — lance dives, blot out the sun",
+	{"id": "tzitzimitl", "name": "TZITZIMITL", "sub": "eclipse serpent — lance dives, devour the sun",
 		"col": Color("#ffb03a")},
 	{"id": "drowned", "name": "THE DROWNED ONE", "sub": "leviathan puppeteer — madden minds, flood streets, call fishmen",
 		"col": Color("#4ac8be")},
@@ -19,13 +19,54 @@ const CITIES := [
 	{"id": "teotl", "name": "TEOTL RUINS", "sub": "jungle temple city — ziggurats, torchlight, old gods' ground"},
 	{"id": "maren", "name": "PORT MAREN", "sub": "half-drowned harbor — warehouses, containers, standing water"},
 ]
+const PROLOGUE := {
+	"swarm": ["The drought year, the villages prayed the locusts would pass them by.",
+		"Something in the cloud heard. Something in the cloud answered.",
+		"It did not pass by."],
+	"keraunos": ["The mountain shrines went cold. No one fed the storm its honors.",
+		"High in the anvil clouds, one throat woke. Then another. Then nine.",
+		"The thunder remembers every unlit candle."],
+	"tzitzimitl": ["They dug the temple out of the jungle and lit it with floodlights.",
+		"The seal had one purpose. The archaeologists called it decoration.",
+		"On the third night, the lights began to disappear. One by one."],
+	"drowned": ["The bay gave them fish for nine generations. They gave it poison.",
+		"The lighthouse keeper heard singing under the waterline.",
+		"He opened the sea gate. He could not say why."],
+	"rider": ["When the plague came, the village burned its sick to save itself.",
+		"The ash was still warm when the hoofbeats started.",
+		"Nothing that burns is ever really gone."],
+}
 
+var ui_font: FontFile
+var screen := "root"   # root | char_crusade | char_skirmish | city_skirmish | prologue
 var picked_char := ""
 
 func _ready() -> void:
 	_build()
 
-var ui_font: FontFile
+func _mklabel(txt: String, y: float, sz: int, col: Color) -> Label:
+	var l := Label.new()
+	l.text = txt
+	l.position = Vector2(0, y)
+	l.size = Vector2(640, sz + 8)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_override("font", ui_font)
+	l.add_theme_font_size_override("font_size", sz)
+	l.add_theme_color_override("font_color", col)
+	add_child(l)
+	return l
+
+func _mkbtn(txt: String, y: float, cb: Callable, col: Color = Color(0.9, 0.88, 0.95)) -> Button:
+	var btn := Button.new()
+	btn.text = txt
+	btn.position = Vector2(190, y)
+	btn.size = Vector2(260, 26)
+	btn.add_theme_font_override("font", ui_font)
+	btn.add_theme_font_size_override("font_size", 13)
+	btn.add_theme_color_override("font_color", col)
+	btn.pressed.connect(cb)
+	add_child(btn)
+	return btn
 
 func _build() -> void:
 	if ui_font == null:
@@ -38,54 +79,63 @@ func _build() -> void:
 	add_child(bg)
 	var title := Label.new()
 	title.text = "C A L A M I T Y"
-	title.position = Vector2(0, 40)
+	title.position = Vector2(0, 36)
 	title.size = Vector2(640, 40)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", load("res://art/Silkscreen-Bold.ttf"))
 	title.add_theme_font_size_override("font_size", 34)
 	title.add_theme_color_override("font_color", Color(1.8, 0.4, 0.45))
 	add_child(title)
-	var sub := Label.new()
-	sub.position = Vector2(0, 86)
-	sub.size = Vector2(640, 20)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_size_override("font_size", 10)
-	sub.add_theme_color_override("font_color", Color("#9ab0d0"))
-	add_child(sub)
-	if picked_char == "":
-		sub.text = "you are the apocalypse.  choose which."
-		_rows(ROSTER, func(id): picked_char = id; _build())
-	else:
-		var cname: String = ROSTER.filter(func(r): return r.id == picked_char)[0].name
-		sub.text = cname + "  —  now choose the city that dies tonight.   [ESC — back]"
-		_rows(CITIES, func(id):
-			Global.character = picked_char
-			Global.city = id
-			get_tree().change_scene_to_file("res://main.tscn"))
-
-func _rows(defs: Array, on_pick: Callable) -> void:
-	for i in defs.size():
-		var d: Dictionary = defs[i]
-		var btn := Button.new()
-		btn.text = d.name
-		btn.position = Vector2(190, 116 + i * 46)
-		btn.size = Vector2(260, 26)
-		btn.add_theme_font_override("font", ui_font)
-		btn.add_theme_font_size_override("font_size", 13)
-		if d.has("col"):
-			btn.add_theme_color_override("font_color", d.col)
-		btn.pressed.connect(func(): on_pick.call(d.id))
-		add_child(btn)
-		var l := Label.new()
-		l.text = d.sub
-		l.position = Vector2(0, 143 + i * 46)
-		l.size = Vector2(640, 14)
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		l.add_theme_font_size_override("font_size", 8)
-		l.add_theme_color_override("font_color", Color("#8890b0"))
-		add_child(l)
+	match screen:
+		"root":
+			_mklabel("you are the apocalypse.", 84, 10, Color("#9ab0d0"))
+			_mkbtn("NEW CRUSADE", 130, func():
+				screen = "char_crusade"
+				_build(), Color(1.7, 0.5, 0.5))
+			_mklabel("prologue, three acts, a continent to raze", 158, 8, Color("#8890b0"))
+			if FileAccess.file_exists(Global.SAVE_PATH):
+				_mkbtn("CONTINUE CRUSADE", 186, func():
+					if Global.load_crusade():
+						if Global.act == 1:
+							Global.launch_act1()
+						else:
+							get_tree().change_scene_to_file("res://map.tscn"))
+			_mkbtn("SKIRMISH", 242, func():
+				screen = "char_skirmish"
+				_build())
+			_mklabel("one god, one city, no stakes", 270, 8, Color("#8890b0"))
+		"char_crusade", "char_skirmish":
+			_mklabel("choose your calamity   [ESC — back]", 84, 10, Color("#9ab0d0"))
+			for i in ROSTER.size():
+				var r: Dictionary = ROSTER[i]
+				_mkbtn(r.name, 108 + i * 46, func():
+					picked_char = r.id
+					if screen == "char_crusade":
+						screen = "prologue"
+					else:
+						screen = "city_skirmish"
+					_build(), r.col)
+				_mklabel(r.sub, 134 + i * 46, 8, Color("#8890b0"))
+		"city_skirmish":
+			_mklabel("now choose the city that dies tonight   [ESC — back]", 84, 10, Color("#9ab0d0"))
+			for i in CITIES.size():
+				var ci: Dictionary = CITIES[i]
+				_mkbtn(ci.name, 108 + i * 46, func():
+					Global.mode = "skirmish"
+					Global.character = picked_char
+					Global.city = ci.id
+					get_tree().change_scene_to_file("res://main.tscn"))
+				_mklabel(ci.sub, 134 + i * 46, 8, Color("#8890b0"))
+		"prologue":
+			var lines: Array = PROLOGUE[picked_char]
+			for i in lines.size():
+				_mklabel(lines[i], 120 + i * 34, 10, Color(0.85, 0.8, 0.85))
+			_mkbtn("SO IT BEGINS", 260, func():
+				Global.reset_crusade(picked_char)
+				Global.launch_act1(), Color(1.7, 0.5, 0.5))
 
 func _input(e: InputEvent) -> void:
-	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and picked_char != "":
+	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and screen != "root":
+		screen = "root"
 		picked_char = ""
 		_build()

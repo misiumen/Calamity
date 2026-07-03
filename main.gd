@@ -3,7 +3,7 @@ extends Node2D
 # Artist facades (Warped City, CC0 by ansimuz) + HDR glow + carved destruction.
 # 640x360 native. Ground y=0, up negative. Facades sliced from sheet at load.
 
-const WORLD_W := 4600.0
+var world_w := 4600.0
 const TIER_NAMES := ["CALM", "POLICE", "GUARD", "ARMY", "AIR STRIKE", "LAST RESORT"]
 const TIER_MULT := [1.0, 1.0, 1.5, 2.0, 3.0, 5.0]
 
@@ -121,6 +121,21 @@ var flash_t := 0.0               # white screen flash on big events
 # --- essence: each god feeds on something different ---
 var essence_eaten := 0.0         # lifetime total -> growth
 var growth := 1.0                # body scale multiplier
+# --- crusade node state ---
+var node_kind := "city"          # hamlet | town | city | capital
+var tier_cap := 5
+var objective := "raze"
+var obj_timer := 0.0
+var obj_started := false
+var people_total := 0
+var people_killed := 0
+var has_citadel := true
+var essence_mult := 1.0
+var heal_mult := 1.0
+var tribute_mult := 1.0
+var specials_total := 0
+var specials_down := 0
+var essence_start := 0.0
 const DIET := {
 	"swarm": {"flesh": 2.0, "fear": 0.2, "light": 0.3, "charge": 0.2, "death": 0.6, "mass": 1.0},
 	"keraunos": {"flesh": 0.3, "fear": 0.2, "light": 0.8, "charge": 2.2, "death": 0.2, "mass": 1.0},
@@ -130,7 +145,7 @@ const DIET := {
 }
 
 func _feed(kind: String, amt: float) -> void:
-	var mult: float = DIET.get(character, DIET["swarm"]).get(kind, 1.0)
+	var mult: float = DIET.get(character, DIET["swarm"]).get(kind, 1.0) * essence_mult
 	var gain: float = amt * mult
 	bio += gain
 	meter = minf(100.0, meter + gain * 0.55)
@@ -144,6 +159,7 @@ func _ready() -> void:
 	randomize()
 	character = Global.character
 	city_def = CITY_DEFS.get(Global.city, CITY_DEFS["kowloon"])
+	_apply_campaign()
 	if character == "tzitzimitl":
 		for i in 16:
 			segs.append(pos)
@@ -408,6 +424,70 @@ func _sfx(name: String) -> void:
 	p.stream = sfx_bank[name]
 	p.pitch_scale = randf_range(0.88, 1.12)
 	p.play()
+
+func _apply_campaign() -> void:
+	if Global.mode != "crusade":
+		return
+	var p: Dictionary = Global.node_params
+	node_kind = p.get("kind", "city")
+	tier_cap = int(p.get("tier_cap", 5))
+	objective = p.get("objective", "raze")
+	world_w = float(p.get("world_w", 4600.0))
+	threat = float(p.get("alert", 0)) * 7.0
+	if p.get("capital", false):
+		city_def = city_def.duplicate()
+		city_def.defense *= 1.4
+		city_def.spawn_mult *= 1.4
+	# carried body: evolutions + growth persist across the crusade
+	branch = Global.c_branch
+	nodes = Global.c_nodes.duplicate()
+	bio_stage = Global.c_bio_stage
+	essence_eaten = Global.c_essence
+	growth = 1.0 + minf(0.75, essence_eaten / 900.0)
+	# act 1 starts you SMALL — a whisper of what you'll be
+	if Global.act == 1:
+		growth = maxf(0.7, growth * [0.7, 0.85, 1.0][mini(2, Global.node_i)])
+	_apply_branch_stats()
+	# relics
+	for rl in Global.relics:
+		match rl:
+			"oldhunger":
+				if bio_stage == 0:
+					bio = BIO_THRESH[0]
+			"thickhide": dmg_taken_mult *= 0.85
+			"darkomen": meter = 50.0
+			"locustyears": essence_mult = 1.25
+			"dreadname": threat_mult *= 0.8
+			"warfeast": heal_mult = 2.0
+			"longshadow": growth = minf(1.75, growth + 0.1)
+			"carrionwind": tribute_mult = 1.3
+	# small settlements: no citadel, gentler mixes
+	essence_start = essence_eaten
+	if objective == "decapitation":
+		obj_timer = 150.0
+	if node_kind in ["hamlet", "town"]:
+		has_citadel = false
+		city_def = city_def.duplicate()
+		city_def.mix = {"house": 0.55, "shop": 0.3, "church": 0.08, "school": 0.07} if node_kind == "town" \
+			else {"house": 0.75, "shop": 0.25}
+		city_def.spawn_mult *= 0.7 if node_kind == "town" else 0.45
+
+func _apply_branch_stats() -> void:
+	# re-apply node effects that normally happen at pick time
+	if nodes.has("chitin"):
+		dmg_taken_mult = 0.65
+	if nodes.has("sinew"):
+		max_grabs = 2
+	if nodes.has("fourthhead"):
+		bolt_max = 4.0 + (1.0 if branch == "manyheads" else 0.0)
+	elif branch == "manyheads":
+		bolt_max = 4.0
+	if nodes.has("voidheart"):
+		eclipse_cost = 55.0
+	if branch == "suneater":
+		eclipse_len = 16.0
+	if nodes.has("blackdawn"):
+		eclipse_len += 8.0
 
 func _hitstop(ms: int, scale: float) -> void:
 	Engine.time_scale = scale
@@ -720,7 +800,7 @@ func _build_city() -> void:
 		banner_imgs.append(im)
 	var x := 380.0
 	var i := 0
-	while x < WORLD_W - 620.0:
+	while x < world_w - 620.0:
 		var kind := _pick_kind()
 		if kind == "tower":
 			var f: Image = facades[i % facades.size()]
@@ -748,51 +828,55 @@ func _build_city() -> void:
 	for j in facades.size():
 		if facades[j].get_height() > facades[big_i].get_height():
 			big_i = j
-	if city_def.get("cit_kind", "") != "":
-		buildings.append(_mk_building(x, _gen_lowrise(city_def.cit_kind), 2.2, true, city_def.cit_kind))
-	else:
-		buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
+	if has_citadel:
+		if city_def.get("cit_kind", "") != "":
+			buildings.append(_mk_building(x, _gen_lowrise(city_def.cit_kind), 2.2, true, city_def.cit_kind))
+		else:
+			buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
 	# strategic landmarks — destroy them to bend the war
+	var n_specials: int = 0 if node_kind == "hamlet" else (2 if node_kind == "town" else 3)
 	var candidates: Array = []
-	for bi in buildings.size() - 1:
+	for bi in buildings.size() - (1 if has_citadel else 0):
 		if not buildings[bi].cit and buildings[bi].w > 40.0:
 			candidates.append(bi)
 	candidates.shuffle()
 	var specials := ["barracks", "comms", "fuel"]
-	for si in mini(3, candidates.size()):
+	for si in mini(n_specials, candidates.size()):
 		buildings[candidates[si]].special = specials[si]
+		specials_total += 1
 	for b in buildings:
 		total_mass += b.maxhp
+	people_total = 70
 	# destructible street furniture
 	for pn in ["control-box-1", "control-box-2", "control-box-3", "monitor-face-1"]:
 		prop_texs.append(load("res://art/props/%s.png" % pn))
 	for k in 40:
-		props.append({"x": randf_range(320, WORLD_W - 340), "tex": prop_texs[randi() % prop_texs.size()], "dead": false})
+		props.append({"x": randf_range(320, world_w - 340), "tex": prop_texs[randi() % prop_texs.size()], "dead": false})
 	# critters — pigeons everywhere, dogs in the gutters, pigs in ashport
 	for k in 30:
-		critters.append({"kind": "pigeon", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
+		critters.append({"kind": "pigeon", "pos": Vector2(randf_range(320, world_w - 340), 0), "vx": 0.0, "vy": 0.0,
 			"panic": false, "dead": false, "o": randf() * TAU})
 	for k in 8:
-		critters.append({"kind": "dog", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
+		critters.append({"kind": "dog", "pos": Vector2(randf_range(320, world_w - 340), 0), "vx": 0.0, "vy": 0.0,
 			"panic": false, "dead": false, "o": randf() * TAU})
 	if Global.city in ["ashport", "teotl"]:
 		for k in 12:
-			critters.append({"kind": "pig", "pos": Vector2(randf_range(320, WORLD_W - 340), 0), "vx": 0.0, "vy": 0.0,
+			critters.append({"kind": "pig", "pos": Vector2(randf_range(320, world_w - 340), 0), "vx": 0.0, "vy": 0.0,
 				"panic": false, "dead": false, "o": randf() * TAU})
 	# Port Maren is already half-drowned — standing water in the streets
 	if Global.city == "maren":
 		for k in 4:
-			var fx0 := randf_range(500, WORLD_W - 700)
+			var fx0 := randf_range(500, world_w - 700)
 			flood.append({"x0": fx0, "x1": fx0 + randf_range(80, 180), "t_left": 1e9, "neutral": true})
 	for k in 26:
-		cars.append({"x": randf_range(300, WORLD_W - 400), "w": randf_range(14, 19), "dead": false,
+		cars.append({"x": randf_range(300, world_w - 400), "w": randf_range(14, 19), "dead": false,
 			"col": [Color("#20303a"), Color("#3a2030"), Color("#2a2a34"), Color("#1c2426")][randi() % 4]})
 	var lamp_x := 320.0
-	while lamp_x < WORLD_W - 300.0:
+	while lamp_x < world_w - 300.0:
 		lamps.append({"x": lamp_x, "dead": false})
 		lamp_x += randf_range(80, 120)
 	for k in 70:
-		people.append({"pos": Vector2(randf_range(320, WORLD_W - 350), 0), "vx": 0.0, "panic": false,
+		people.append({"pos": Vector2(randf_range(320, world_w - 350), 0), "vx": 0.0, "panic": false,
 			"o": randf() * TAU, "col": Color(randf_range(0.4, 0.7), randf_range(0.4, 0.6), randf_range(0.5, 0.75))})
 
 func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "tower") -> Dictionary:
@@ -936,6 +1020,7 @@ func _process(delta: float) -> void:
 		_people(delta)
 		_army(delta)
 		threat = min(100.0, threat + 0.22 * delta * threat_mult)
+		tier = mini(tier, tier_cap)
 		# evac buses run the gauntlet — mobile feasts
 		bus_cd -= delta
 		if bus_cd <= 0.0 and buses.size() < 2:
@@ -1000,7 +1085,7 @@ func _process(delta: float) -> void:
 	shake = max(0.0, shake - 30.0 * delta)
 	hit_flash = max(0.0, hit_flash - 4.0 * delta)
 	cam.position = cam.position.lerp(Vector2(pos.x, -105), 6.0 * delta)
-	cam.position.x = clamp(cam.position.x, 320, WORLD_W - 320)
+	cam.position.x = clamp(cam.position.x, 320, world_w - 320)
 	cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
 	swarm_light.position = pos
 	swarm_light.energy = 1.0 + 0.25 * sin(t * 7.0) + hit_flash
@@ -1013,7 +1098,7 @@ func _move(delta: float) -> void:
 	vel *= pow(0.02, delta)
 	vel = vel.limit_length(220.0)
 	pos += vel * delta
-	pos.x = clamp(pos.x, 40, WORLD_W - 40)
+	pos.x = clamp(pos.x, 40, world_w - 40)
 	pos.y = clamp(pos.y, -340, -12)
 
 func _people(delta: float) -> void:
@@ -1056,7 +1141,7 @@ func _people(delta: float) -> void:
 			p.vx = move_toward(p.vx, -signf(d) * 46.0, 200.0 * delta)
 		else:
 			p.vx = sin(t * 0.6 + p.o) * 9.0
-		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, WORLD_W - 320)
+		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, world_w - 320)
 	# terror is a meal — panicking minds bleed fear
 	var afraid := 0
 	for p in people:
@@ -1085,13 +1170,13 @@ func _people(delta: float) -> void:
 					cr.vx = move_toward(cr.vx, -signf(d2) * 62.0, 260.0 * delta)
 				else:
 					cr.vx = sin(t * 0.5 + cr.o) * 14.0
-				cr.pos.x = clampf(cr.pos.x + cr.vx * delta, 300, WORLD_W - 320)
+				cr.pos.x = clampf(cr.pos.x + cr.vx * delta, 300, world_w - 320)
 			"pig":
 				if cr.panic:
 					cr.vx = move_toward(cr.vx, -signf(d2) * 34.0, 160.0 * delta)
 				else:
 					cr.vx = sin(t * 0.35 + cr.o) * 7.0
-				cr.pos.x = clampf(cr.pos.x + cr.vx * delta, 300, WORLD_W - 320)
+				cr.pos.x = clampf(cr.pos.x + cr.vx * delta, 300, world_w - 320)
 	critters = critters.filter(func(cr): return not cr.dead)
 
 # --- tendril + evolution state ---
@@ -1282,7 +1367,7 @@ func _tendrils(delta: float) -> void:
 			u.tvel.y += 260.0 * delta
 			u.crash_cd = maxf(0.0, u.get("crash_cd", 0.0) - delta)
 			_unit_crash_buildings(u, crash_dmg * 2.0)
-			if u.pos.y >= 0.0 or u.pos.x < 40 or u.pos.x > WORLD_W - 40:
+			if u.pos.y >= 0.0 or u.pos.x < 40 or u.pos.x > world_w - 40:
 				u.dead = true
 				_kill_unit(u)
 			continue
@@ -1531,7 +1616,7 @@ func _tzitzi_move(delta: float) -> void:
 		vel *= pow(0.05, delta)
 		vel = vel.limit_length(280.0)
 		pos += vel * delta
-	pos.x = clamp(pos.x, 40, WORLD_W - 40)
+	pos.x = clamp(pos.x, 40, world_w - 40)
 	pos.y = clamp(pos.y, -340, -10)
 	_hit_props(pos, 12.0)   # the serpent's passage devours light and crushes steel
 	if segs.is_empty() or segs[0].distance_to(pos) > 3.0:
@@ -1668,7 +1753,7 @@ func _ground_move(delta: float, top_speed: float) -> void:
 	if pos.y > -12.0:
 		pos.y = -12.0
 		vel.y = 0.0
-	pos.x = clamp(pos.x, 40, WORLD_W - 40)
+	pos.x = clamp(pos.x, 40, world_w - 40)
 	aim = get_global_mouse_position()
 	aim_clamped = false
 	feeding = false
@@ -1701,7 +1786,7 @@ func _drowned(delta: float) -> void:
 		_sfx("eclipse")
 		var n_fish: int = 6 if branch == "father" else 4
 		for i in n_fish:
-			var fx: float = clampf(aim.x + randf_range(-30, 30), 60, WORLD_W - 60)
+			var fx: float = clampf(aim.x + randf_range(-30, 30), 60, world_w - 60)
 			var kind := "brute" if (branch == "father" and i % 2 == 0) else "fishman"
 			if nodes.has("priests") and i == 0:
 				kind = "priest"
@@ -2086,6 +2171,8 @@ func _collapse(b: Dictionary) -> void:
 				if b2 != b and not b2.dead and absf(b2.x - b.x) < 130.0:
 					_ignite(b2, 3.0)
 			shake = 22.0
+	if b.get("special", "") != "":
+		specials_down += 1
 	_sfx("crumble")
 
 func _hit_props(p: Vector2, r: float) -> void:
@@ -2377,7 +2464,7 @@ func _kill_unit(u: Dictionary) -> void:
 	_feed("death", 20.0 if u.kind == "tank" else 12.0)
 	combo = minf(9.5, combo + (0.6 if nodes.has("cloud") else 0.3))
 	combo_idle = 0.0
-	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0))
+	hp = minf(100.0, hp + ((6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0)) * heal_mult)
 	threat = minf(100.0, threat + 1.5)
 	shake = 10.0
 	if u.kind in ["tank", "heli", "jet", "arty"]:
@@ -2423,7 +2510,7 @@ func _army(delta: float) -> void:
 		spawn_cd = maxf(0.3, (1.4 - tier * 0.18) / city_def.spawn_mult)
 		var side: float = -1.0 if randf() < 0.5 else 1.0
 		var x: float = pos.x + side * randf_range(360, 560)
-		if x > 30 and x < WORLD_W - 30:
+		if x > 30 and x < world_w - 30:
 			var roll := randf()
 			if tier >= 5 and roll < 0.15 and not units.any(func(u): return u.kind == "jet"):
 				units.append({"kind": "jet", "pos": Vector2(pos.x - side * 700.0, -250), "cd": 0.0,
@@ -2603,12 +2690,109 @@ func _eaten_frac() -> float:
 	return eaten / total_mass
 
 func _check_end() -> void:
-	var cit: Dictionary = buildings[-1]
 	var et: Dictionary = END_TEXT[character]
-	if _eaten_frac() >= 0.9 or cit.dead or cit.dying > 0.0:
-		_end(et.win, "%s  score %s  —  R restart / ESC menu" % [et.win_s, _fmt(int(score_f))])
-	elif hp <= 0.0:
-		_end(et.lose, "%s  score %s  —  R restart / ESC menu" % [et.lose_s, _fmt(int(score_f))])
+	people_killed = people_total - people.size()
+	var cit_down := false
+	if has_citadel:
+		var cit: Dictionary = buildings[-1]
+		cit_down = cit.dead or cit.dying > 0.0
+	if hp <= 0.0:
+		_finish(false, et)
+		return
+	var won := false
+	match objective:
+		"decapitation":
+			obj_timer -= get_process_delta_time()
+			if cit_down:
+				won = true
+			elif obj_timer <= 0.0:
+				_finish(false, et)
+				return
+		"extinction":
+			won = people_killed >= int(people_total * 0.85)
+		"blackout":
+			won = specials_total > 0 and specials_down >= specials_total
+		"terror":
+			if tier >= tier_cap and not obj_started:
+				obj_started = true
+				obj_timer = 90.0
+				_pop(pos + Vector2(0, -30), "NOW SURVIVE", Color(2.0, 0.5, 0.4))
+			if obj_started:
+				obj_timer -= get_process_delta_time()
+				won = obj_timer <= 0.0
+		"feast":
+			if essence_eaten - essence_start >= 250.0:
+				won = true
+			elif night_f >= 1.0 and not sun_eaten:
+				_finish(false, et)
+				return
+		_:
+			won = _eaten_frac() >= 0.9 or cit_down
+	if won:
+		_finish(true, et)
+
+func _finish(win: bool, et: Dictionary) -> void:
+	if over:
+		return
+	if Global.mode != "crusade":
+		if win:
+			_end(et.win, "%s  score %s  —  R restart / ESC menu" % [et.win_s, _fmt(int(score_f))])
+		else:
+			_end(et.lose, "%s  score %s  —  R restart / ESC menu" % [et.lose_s, _fmt(int(score_f))])
+		return
+	# --- crusade flow ---
+	if win:
+		var award := int(score_f / 1000.0 * tribute_mult)
+		Global.tribute += award
+		Global.c_branch = branch
+		Global.c_nodes = nodes
+		Global.c_bio_stage = bio_stage
+		Global.c_essence = essence_eaten
+		var bt := ""
+		if Global.act == 1:
+			if Global.node_i < 2:
+				Global.node_i += 1
+				bt = "MARCH ON"
+			else:
+				Global.act = 2
+				bt = "THE CRUSADE BEGINS"
+		else:
+			Global.razed.append(Global.node_params.get("map_node", Global.map_pos))
+			if Global.node_params.get("capital", false):
+				bt = "THE CONTINENT IS ASH"
+			else:
+				bt = "TO THE MAP"
+		Global.save_crusade()
+		_end(et.win, "%s   tribute +%d" % [et.win_s, award])
+		_crusade_button(bt, win)
+	else:
+		Global.tribute = int(Global.tribute * 0.8)
+		Global.save_crusade()
+		_end(et.lose, "%s   the crusade endures — tribute wanes." % et.lose_s)
+		_crusade_button("RISE AGAIN", win)
+
+func _crusade_button(label: String, win: bool) -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 95
+	add_child(layer)
+	var btn := Button.new()
+	btn.text = label
+	btn.position = Vector2(230, 228)
+	btn.size = Vector2(180, 30)
+	btn.add_theme_font_override("font", ui_font)
+	btn.add_theme_font_size_override("font_size", 13)
+	btn.pressed.connect(func():
+		Engine.time_scale = 1.0
+		if not win:
+			get_tree().reload_current_scene()
+		elif Global.act == 1:
+			Global.launch_act1()
+		elif Global.node_params.get("capital", false):
+			get_tree().change_scene_to_file("res://menu.tscn")
+		else:
+			Global.node_params = {"offer_relic": true}
+			get_tree().change_scene_to_file("res://map.tscn"))
+	layer.add_child(btn)
 
 func _end(m: String, s: String) -> void:
 	over = true
@@ -2677,6 +2861,9 @@ func _build_hud() -> void:
 	layer.add_child(hud.lb_bot)
 	hud.citylbl = _label(layer, Vector2(478, 48), 8, Color("#9ab0d0"))
 	hud.city = _bar(layer, Vector2(478, 60), Color("#9a5de0"))
+	hud.obj = _label(layer, Vector2(0, 4), 9, Color("#ffd75a"))
+	hud.obj.size = Vector2(640, 14)
+	hud.obj.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud.msg = _label(layer, Vector2(0, 140), 28, Color("#ffb08a"))
 	hud.msg.size = Vector2(640, 40)
 	hud.msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2749,6 +2936,14 @@ func _hud_update() -> void:
 	hud.lb_bot.size.y = 44.0 * letterbox
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
+	if Global.mode == "crusade":
+		match objective:
+			"decapitation": hud.obj.text = "OBJECTIVE: TOPPLE THE CITADEL — %ds" % int(maxf(0, obj_timer))
+			"extinction": hud.obj.text = "OBJECTIVE: EXTINCTION — %d / %d" % [people_killed, int(people_total * 0.85)]
+			"blackout": hud.obj.text = "OBJECTIVE: BLACKOUT — landmarks %d / %d" % [specials_down, specials_total]
+			"terror": hud.obj.text = ("OBJECTIVE: SURVIVE — %ds" % int(maxf(0, obj_timer))) if obj_started else "OBJECTIVE: TERROR — reach LAST RESORT"
+			"feast": hud.obj.text = "OBJECTIVE: FEAST — %d / 250 before nightfall" % int(essence_eaten - essence_start)
+			_: hud.obj.text = "OBJECTIVE: RAZE — devour 90%% or the citadel"
 	match character:
 		"keraunos":
 			var need: float = 25.0 if nodes.has("conductor") else (40.0 if branch == "skyfall" else (70.0 if nodes.has("stormfront") else 100.0))
