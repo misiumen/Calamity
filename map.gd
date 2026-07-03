@@ -14,6 +14,8 @@ const NODES := [
 	{"id": 9, "pos": Vector2(470, 240), "kind": "city", "city": "teotl", "name": "TEOTL RUINS", "links": [6, 7]},
 	{"id": 10, "pos": Vector2(540, 300), "kind": "city", "city": "kowloon", "name": "NEW KOWLOON", "links": [7, 9]},
 	{"id": 11, "pos": Vector2(580, 170), "kind": "capital", "city": "kowloon", "name": "THE CAPITAL", "links": [8, 9, 10]},
+	{"id": 12, "pos": Vector2(210, 100), "kind": "relicsite", "name": "OLD ALTAR", "links": [1, 3]},
+	{"id": 13, "pos": Vector2(440, 330), "kind": "relicsite", "name": "SUNKEN VAULT", "links": [5, 7]},
 ]
 const RELICS := [
 	{"id": "oldhunger", "name": "OLD HUNGER", "desc": "begin every city with your first evolution ready"},
@@ -55,6 +57,14 @@ func _unhandled_input(e: InputEvent) -> void:
 		var mp := get_global_mouse_position()
 		for n in NODES:
 			if n.pos.distance_to(mp) < 16.0 and _reachable(n.id):
+				if n.kind == "relicsite":
+					# no battle here — an old power waits to be claimed
+					Global.map_pos = n.id
+					Global.razed.append(n.id)
+					Global.save_crusade()
+					picking_relic = true
+					_relic_overlay()
+					return
 				_launch(n)
 				return
 
@@ -161,6 +171,9 @@ func _draw() -> void:
 			"capital":
 				col = Color(1.8, 1.2, 0.4)
 				r = 12.0
+			"relicsite":
+				col = Color(0.9, 0.5, 1.4)
+				r = 7.0
 			_: col = Color(0.55, 0.4, 0.6)
 		var razed_n: bool = n.id in Global.razed
 		if razed_n:

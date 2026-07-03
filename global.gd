@@ -52,7 +52,8 @@ func launch_act1() -> void:
 	city = cities[randi() % cities.size()]
 	match node_i:
 		0: node_params = {"kind": "hamlet", "world_w": 1900.0, "tier_cap": 1, "objective": "raze"}
-		1: node_params = {"kind": "town", "world_w": 2900.0, "tier_cap": 3, "objective": "raze"}
+		1: node_params = {"kind": "town", "world_w": 2900.0, "tier_cap": 3,
+			"objective": ["blackout", "extinction"][randi() % 2]}
 		_: node_params = {"kind": "city", "world_w": 4600.0, "tier_cap": 5, "objective": "raze"}
 	get_tree().change_scene_to_file("res://main.tscn")
 

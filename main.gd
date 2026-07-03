@@ -136,6 +136,24 @@ var tribute_mult := 1.0
 var specials_total := 0
 var specials_down := 0
 var essence_start := 0.0
+# bonus objective + capital doomsday + prologue
+var bonus_obj := ""
+var bonus_met := false
+var hits_taken := 0
+var unit_kills := 0
+var run_time := 0.0
+var is_capital := false
+var doom_cd := 45.0
+var doom_p := Vector2.ZERO
+var doom_t := 0.0
+var prologue := false
+var prol_beats: Array = []
+var prol_i := 0
+var madden_count := 0
+var risen_count := 0
+var lamps_down := 0
+var buildings_razed := 0
+var caption_layer: CanvasLayer = null
 const DIET := {
 	"swarm": {"flesh": 2.0, "fear": 0.2, "light": 0.3, "charge": 0.2, "death": 0.6, "mass": 1.0},
 	"keraunos": {"flesh": 0.3, "fear": 0.2, "light": 0.8, "charge": 2.2, "death": 0.2, "mass": 1.0},
@@ -209,6 +227,8 @@ func _ready() -> void:
 	swarm_light.texture_scale = 2.2
 	add_child(swarm_light)
 	_build_hud()
+	if prologue:
+		_caption(prol_beats[0].cap, false)
 
 func _bake_serpent() -> void:
 	# hand-baked pixel sprites, drawn once — outline + shading like real sheet art
@@ -434,10 +454,24 @@ func _apply_campaign() -> void:
 	objective = p.get("objective", "raze")
 	world_w = float(p.get("world_w", 4600.0))
 	threat = float(p.get("alert", 0)) * 7.0
-	if p.get("capital", false):
+	is_capital = p.get("capital", false)
+	if is_capital:
 		city_def = city_def.duplicate()
 		city_def.defense *= 1.4
 		city_def.spawn_mult *= 1.4
+	# bonus objective — one extra dare per act-2 node
+	if Global.act == 2 and node_kind != "prologue" and objective != "raze":
+		var pool := ["untouchable", "warlord", "swift", "pyromaniac"]
+		if character in ["drowned", "rider"]:
+			pool.append("shepherd")
+		bonus_obj = pool[randi() % pool.size()]
+	if node_kind == "prologue":
+		prologue = true
+		has_citadel = false
+		tier_cap = 0
+		growth = 0.5
+		_setup_prologue()
+		return
 	# carried body: evolutions + growth persist across the crusade
 	branch = Global.c_branch
 	nodes = Global.c_nodes.duplicate()
@@ -471,6 +505,94 @@ func _apply_campaign() -> void:
 		city_def.mix = {"house": 0.55, "shop": 0.3, "church": 0.08, "school": 0.07} if node_kind == "town" \
 			else {"house": 0.75, "shop": 0.25}
 		city_def.spawn_mult *= 0.7 if node_kind == "town" else 0.45
+
+const PROLOGUE_DEFS := {
+	"swarm": {"city": "ashport", "beats": [
+		{"goal": "people", "n": 8, "cap": "The drought year, the villages prayed the locusts would pass.\nSomething in the cloud heard. EAT."},
+		{"goal": "essence", "n": 50, "cap": "The cloud tasted prayer, and found it thin.\nIt tasted the harvest. It tasted THEM."},
+		{"goal": "buildings", "n": 2, "cap": "By dawn there was no village.\nBy dusk, no word for what the cloud had become."}]},
+	"keraunos": {"city": "thornspire", "beats": [
+		{"goal": "buildings", "n": 1, "cap": "The mountain shrines went cold. No one fed the storm.\nSTRIKE the shrine that forgot you."},
+		{"goal": "lamps", "n": 3, "cap": "One throat woke. Snuff their little lights —\nlet them remember what light IS."},
+		{"goal": "essence", "n": 50, "cap": "Nine throats now. The valley below\nstill owes nine hundred winters of candles."}]},
+	"tzitzimitl": {"city": "teotl", "beats": [
+		{"goal": "lamps", "n": 4, "cap": "They dug the temple from the jungle and lit it with floodlights.\nThe lights began to disappear. BE WHY."},
+		{"goal": "buildings", "n": 1, "cap": "Longer now. Brighter inside.\nThe dig site's generators sing to you. Pierce the camp."},
+		{"goal": "essence", "n": 50, "cap": "The seal had one purpose.\nOverhead, the sun has noticed you. Good."}]},
+	"drowned": {"city": "maren", "beats": [
+		{"goal": "essence", "n": 25, "cap": "Nine generations of fish. One generation of poison.\nRise. Let the harbor SEE you, and drink their fear."},
+		{"goal": "madden", "n": 2, "cap": "The harbor watch has come.\nWhisper to them. Break their little minds."},
+		{"goal": "kills", "n": 2, "cap": "They turn on each other so easily.\nBelow the waterline, something old approves."}]},
+	"rider": {"city": "thornspire", "beats": [
+		{"goal": "people", "n": 6, "cap": "They burned their sick to save the village.\nRide through. Your fog does the rest."},
+		{"goal": "risen", "n": 4, "cap": "The ash was still warm when the hoofbeats started.\nThe dead hear them too. They RISE."},
+		{"goal": "essence", "n": 50, "cap": "Nothing that burns is ever really gone.\nThe village learns this now. The world learns next."}]},
+}
+
+func _setup_prologue() -> void:
+	var pd: Dictionary = PROLOGUE_DEFS[character]
+	Global.city = pd.city
+	city_def = CITY_DEFS[pd.city].duplicate()
+	city_def.mix = {"house": 0.62, "shop": 0.24, "shrine": 0.14} if character == "keraunos" \
+		else {"house": 0.7, "shop": 0.3}
+	city_def.spawn_mult = 0.0
+	world_w = 1500.0
+	prol_beats = pd.beats
+	essence_start = 0.0
+	# the drowned one's vignette needs a harbor watch to break
+	if character == "drowned":
+		meter = 40.0
+
+func _prologue_check() -> void:
+	if prol_i >= prol_beats.size() or caption_layer != null:
+		return
+	var beat: Dictionary = prol_beats[prol_i]
+	var progress: float = 0.0
+	match beat.goal:
+		"people": progress = people_killed
+		"lamps": progress = lamps_down
+		"buildings": progress = buildings_razed
+		"essence": progress = essence_eaten - essence_start
+		"madden": progress = madden_count
+		"kills": progress = unit_kills
+		"risen": progress = risen_count
+	hud.obj.text = "%s — %d / %d" % [beat.goal.to_upper(), int(progress), beat.n]
+	if progress >= beat.n:
+		prol_i += 1
+		growth = minf(1.0, growth + 0.18)
+		_sfx("pick")
+		if prol_i < prol_beats.size():
+			_caption(prol_beats[prol_i].cap, false)
+		else:
+			_caption("IT HAS A NAME NOW.\nAnd the world has a problem.", true)
+
+func _caption(text: String, final: bool) -> void:
+	caption_layer = CanvasLayer.new()
+	caption_layer.layer = 96
+	add_child(caption_layer)
+	var dim := ColorRect.new()
+	dim.size = Vector2(640, 360)
+	dim.color = Color(0.02, 0.0, 0.05, 0.82)
+	caption_layer.add_child(dim)
+	var l := _label(caption_layer, Vector2(60, 140), 12, Color(0.9, 0.85, 0.9))
+	l.size = Vector2(520, 80)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD
+	l.text = text
+	var btn := Button.new()
+	btn.text = "SO IT BEGINS" if final else "..."
+	btn.position = Vector2(250, 240)
+	btn.size = Vector2(140, 28)
+	btn.add_theme_font_override("font", ui_font)
+	btn.add_theme_font_size_override("font_size", 12)
+	btn.pressed.connect(func():
+		caption_layer.queue_free()
+		caption_layer = null
+		if final:
+			Global.node_i = 0
+			Global.save_crusade()
+			Global.launch_act1())
+	caption_layer.add_child(btn)
 
 func _apply_branch_stats() -> void:
 	# re-apply node effects that normally happen at pick time
@@ -834,7 +956,7 @@ func _build_city() -> void:
 		else:
 			buildings.append(_mk_building(x, facades[big_i], 2.0, true, "tower"))
 	# strategic landmarks — destroy them to bend the war
-	var n_specials: int = 0 if node_kind == "hamlet" else (2 if node_kind == "town" else 3)
+	var n_specials: int = 0 if node_kind in ["hamlet", "prologue"] else (2 if node_kind == "town" else 3)
 	var candidates: Array = []
 	for bi in buildings.size() - (1 if has_citadel else 0):
 		if not buildings[bi].cit and buildings[bi].w > 40.0:
@@ -863,6 +985,10 @@ func _build_city() -> void:
 		for k in 12:
 			critters.append({"kind": "pig", "pos": Vector2(randf_range(320, world_w - 340), 0), "vx": 0.0, "vy": 0.0,
 				"panic": false, "dead": false, "o": randf() * TAU})
+	# the drowned one's origin: a small harbor watch to break
+	if prologue and character == "drowned":
+		for k in 3:
+			units.append({"kind": "police", "pos": Vector2(pos.x + 300.0 + k * 60.0, 0), "cd": randf_range(1.0, 2.0), "hp": 1})
 	# Port Maren is already half-drowned — standing water in the streets
 	if Global.city == "maren":
 		for k in 4:
@@ -961,8 +1087,8 @@ func _process(delta: float) -> void:
 				"t_left": 6.0, "tick": 0.5})
 	pods = pods.filter(func(p): return p.t_left > 0.0 and not p.b.dead)
 	pods.append_array(spawn_pods)
-	# biomass threshold -> evolution draft (all calamities)
-	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over:
+	# biomass threshold -> evolution draft (all calamities; not during origin vignettes)
+	if bio_stage < BIO_THRESH.size() and bio >= BIO_THRESH[bio_stage] and not over and not prologue:
 		_open_draft()
 	# hit-stop release (real-time clock, immune to the frozen timescale)
 	if hitstop_until > 0 and Time.get_ticks_msec() > hitstop_until:
@@ -997,6 +1123,37 @@ func _process(delta: float) -> void:
 	frags = frags.filter(func(fr): return fr.life > 0.0)
 	# dusk falls into night with time and violence; a devoured sun ends the argument
 	night_f = 1.0 if sun_eaten else clampf(maxf(t / 160.0, threat / 75.0) + 0.12, 0.12, 1.0)
+	run_time += delta
+	if prologue:
+		people_killed = people_total - people.size()
+		_prologue_check()
+		if caption_layer != null:
+			return
+	# THE CAPITAL answers with its own apocalypse
+	if is_capital and not over and threat >= 99.0:
+		doom_cd -= delta
+		if doom_t > 0.0:
+			doom_t -= delta
+			if doom_t <= 0.0:
+				flash_t = 1.0
+				shake = 30.0
+				_hitstop(200, 0.2)
+				_sfx("skyfall")
+				parts.append({"pos": doom_p, "vel": Vector2.ZERO, "life": 0.5, "col": Color(2.6, 2.2, 1.4), "flash": true, "size": 60.0})
+				parts.append({"pos": doom_p, "vel": Vector2.ZERO, "life": 0.5, "col": Color(2.4, 1.8, 0.8), "ring": true, "size": 12.0})
+				if pos.distance_to(doom_p) < 120.0:
+					hp -= 40.0 * dmg_taken_mult
+					hit_flash = 1.0
+				for b in buildings:
+					if not b.dead and b.dying <= 0.0 and absf(b.x + b.w * 0.5 - doom_p.x) < 100.0:
+						_collapse(b)
+				_hit_props(doom_p, 110.0)
+		elif doom_cd <= 0.0:
+			doom_cd = 45.0
+			doom_t = 3.0
+			doom_p = pos
+			_pop(pos + Vector2(0, -40), "!! LAST RESORT INBOUND — MOVE !!", Color(2.4, 0.4, 0.3))
+			_sfx("thunder")
 	if not over:
 		match character:
 			"keraunos":
@@ -1810,6 +1967,7 @@ func _drowned(delta: float) -> void:
 			allies.append({"kind": "fishman", "pos": Vector2(pos.x + randf_range(-40, 40), -4), "hp": 3, "cd": 0.0, "life": 30.0})
 
 func _madden(u: Dictionary) -> void:
+	madden_count += 1
 	u.mad = true
 	u.mad_t = 12.0 + (8.0 if nodes.has("hollowing") else 0.0)
 	combo = minf(9.5, combo + 0.2)
@@ -1872,6 +2030,7 @@ func _rise(p: Vector2, armed: bool) -> void:
 	var cap: int = 16 if branch == "legion" else 8
 	if allies.size() >= cap:
 		return
+	risen_count += 1
 	allies.append({"kind": "risen_soldier" if armed else "risen", "pos": Vector2(p.x, -4),
 		"hp": 4 if armed else 2, "cd": 0.0,
 		"life": 1e9 if nodes.has("endless") else 25.0})
@@ -2105,6 +2264,7 @@ func _collapse(b: Dictionary) -> void:
 	if b.dying > 0.0 or b.dead:
 		return
 	b.dying = 0.28
+	buildings_razed += 1
 	_hitstop(300 if b.cit else 110, 0.15 if b.cit else 0.3)
 	flash_t = maxf(flash_t, 0.55 if b.cit else 0.3)
 	var cx: float = b.x + b.w * 0.5
@@ -2217,6 +2377,7 @@ func _hit_props(p: Vector2, r: float) -> void:
 		if l.dead or absf(l.x - p.x) > r or p.y < -34.0:
 			continue
 		l.dead = true
+		lamps_down += 1
 		score_f += 15.0 * combo * TIER_MULT[tier]
 		_boom(Vector2(l.x, -24), 8, Color(2.0, 1.7, 0.9), 80.0)
 		_feed("light", 8.0)
@@ -2459,6 +2620,7 @@ func _kill_unit(u: Dictionary) -> void:
 		"soldier": base = 120
 		"carcass": base = 150
 		_: base = 300
+	unit_kills += 1
 	var gain := int(base * combo * TIER_MULT[tier])
 	score_f += gain
 	_feed("death", 20.0 if u.kind == "tank" else 12.0)
@@ -2676,6 +2838,7 @@ func _army(delta: float) -> void:
 		if s.pos.distance_to(pos) < radius:
 			s.life = 0.0
 			hp -= (6.0 if s.heavy else 3.0) * dmg_taken_mult * defense
+			hits_taken += 1
 			combo = max(1.0, combo - 1.0)
 			shake = 6.0
 			hit_flash = 1.0
@@ -2690,8 +2853,23 @@ func _eaten_frac() -> float:
 	return eaten / total_mass
 
 func _check_end() -> void:
+	if prologue:
+		return
 	var et: Dictionary = END_TEXT[character]
 	people_killed = people_total - people.size()
+	# bonus dare tracking
+	match bonus_obj:
+		"untouchable": bonus_met = hits_taken <= 3
+		"warlord": bonus_met = unit_kills >= 8
+		"swift": bonus_met = run_time <= 180.0
+		"shepherd": bonus_met = allies.size() >= 6
+		"pyromaniac":
+			var burning := 0
+			for b in buildings:
+				if b.burn > 0.5 and not b.dead:
+					burning += 1
+			if burning >= 6:
+				bonus_met = true   # latches once achieved
 	var cit_down := false
 	if has_citadel:
 		var cit: Dictionary = buildings[-1]
@@ -2743,6 +2921,8 @@ func _finish(win: bool, et: Dictionary) -> void:
 	# --- crusade flow ---
 	if win:
 		var award := int(score_f / 1000.0 * tribute_mult)
+		if bonus_obj != "" and bonus_met:
+			award = int(award * 1.5)
 		Global.tribute += award
 		Global.c_branch = branch
 		Global.c_nodes = nodes
@@ -2763,7 +2943,10 @@ func _finish(win: bool, et: Dictionary) -> void:
 			else:
 				bt = "TO THE MAP"
 		Global.save_crusade()
-		_end(et.win, "%s   tribute +%d" % [et.win_s, award])
+		var bonus_line := ""
+		if bonus_obj != "":
+			bonus_line = "   dare %s: %s" % [bonus_obj.to_upper(), "MET +50%" if bonus_met else "failed"]
+		_end(et.win, "%s   tribute +%d%s" % [et.win_s, award, bonus_line])
 		_crusade_button(bt, win)
 	else:
 		Global.tribute = int(Global.tribute * 0.8)
@@ -2944,6 +3127,8 @@ func _hud_update() -> void:
 			"terror": hud.obj.text = ("OBJECTIVE: SURVIVE — %ds" % int(maxf(0, obj_timer))) if obj_started else "OBJECTIVE: TERROR — reach LAST RESORT"
 			"feast": hud.obj.text = "OBJECTIVE: FEAST — %d / 250 before nightfall" % int(essence_eaten - essence_start)
 			_: hud.obj.text = "OBJECTIVE: RAZE — devour 90%% or the citadel"
+		if bonus_obj != "":
+			hud.obj.text += "    ·    DARE: %s%s" % [bonus_obj.to_upper(), " ✓" if bonus_met else ""]
 	match character:
 		"keraunos":
 			var need: float = 25.0 if nodes.has("conductor") else (40.0 if branch == "skyfall" else (70.0 if nodes.has("stormfront") else 100.0))

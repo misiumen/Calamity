@@ -130,9 +130,13 @@ func _build() -> void:
 			var lines: Array = PROLOGUE[picked_char]
 			for i in lines.size():
 				_mklabel(lines[i], 120 + i * 34, 10, Color(0.85, 0.8, 0.85))
-			_mkbtn("SO IT BEGINS", 260, func():
+			_mkbtn("LIVE IT", 260, func():
 				Global.reset_crusade(picked_char)
-				Global.launch_act1(), Color(1.7, 0.5, 0.5))
+				Global.node_params = {"kind": "prologue"}
+				get_tree().change_scene_to_file("res://main.tscn"), Color(1.7, 0.5, 0.5))
+			_mkbtn("SKIP TO ACT I", 296, func():
+				Global.reset_crusade(picked_char)
+				Global.launch_act1())
 
 func _input(e: InputEvent) -> void:
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and screen != "root":
