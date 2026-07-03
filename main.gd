@@ -116,6 +116,27 @@ var prev_combo := 1.0
 var hitstop_until := 0
 var letterbox := 0.0
 var ambient: Array = []          # drifting embers/dust
+var frags: Array = []            # tumbling building fragments
+var flash_t := 0.0               # white screen flash on big events
+# --- essence: each god feeds on something different ---
+var essence_eaten := 0.0         # lifetime total -> growth
+var growth := 1.0                # body scale multiplier
+const DIET := {
+	"swarm": {"flesh": 2.0, "fear": 0.2, "light": 0.3, "charge": 0.2, "death": 0.6, "mass": 1.0},
+	"keraunos": {"flesh": 0.3, "fear": 0.2, "light": 0.8, "charge": 2.2, "death": 0.2, "mass": 1.0},
+	"tzitzimitl": {"flesh": 0.3, "fear": 0.2, "light": 2.4, "charge": 0.8, "death": 0.2, "mass": 0.8},
+	"drowned": {"flesh": 0.4, "fear": 2.4, "light": 0.2, "charge": 0.2, "death": 0.8, "mass": 0.7},
+	"rider": {"flesh": 0.5, "fear": 0.6, "light": 0.1, "charge": 0.1, "death": 2.6, "mass": 0.6},
+}
+
+func _feed(kind: String, amt: float) -> void:
+	var mult: float = DIET.get(character, DIET["swarm"]).get(kind, 1.0)
+	var gain: float = amt * mult
+	bio += gain
+	meter = minf(100.0, meter + gain * 0.55)
+	essence_eaten += gain
+	# growth: the more you consume of YOUR hunger, the bigger you get
+	growth = 1.0 + minf(0.75, essence_eaten / 900.0)
 
 var _shot_frames := 0
 
@@ -846,7 +867,7 @@ func _process(delta: float) -> void:
 			_carve(b, world, randf_range(2.0, 4.0))
 			b.hp -= 2.0
 			score_f += 3.0 * combo * TIER_MULT[tier]
-			bio += 0.6
+			_feed("mass", 0.6)
 			if b.hp <= 0.0:
 				_collapse(b)
 	var spawn_pods: Array = []
@@ -863,6 +884,33 @@ func _process(delta: float) -> void:
 	if hitstop_until > 0 and Time.get_ticks_msec() > hitstop_until:
 		Engine.time_scale = 1.0
 		hitstop_until = 0
+	flash_t = maxf(0.0, flash_t - 2.5 * delta)
+	# growth reshapes the body
+	match character:
+		"swarm":
+			radius = 22.0 * growth
+			tendril_range = (140.0 if nodes.has("sinew") else 100.0) * growth
+		"keraunos": radius = 52.0 * growth
+		"tzitzimitl": radius = 16.0 * growth
+		"drowned": radius = 24.0 * growth
+		"rider": radius = 18.0 * growth
+	# tumbling masonry
+	for fr in frags:
+		fr.vel.y += 260.0 * delta
+		fr.pos += fr.vel * delta
+		fr.rot += fr.rotv * delta
+		fr.life -= delta
+		if fr.pos.y >= -2.0 and fr.vel.y > 0.0:
+			if fr.vel.y > 60.0:
+				fr.vel.y *= -0.3
+				fr.rotv *= 0.5
+				_boom(fr.pos, 5, Color(0.4, 0.35, 0.4), 60.0)
+				shake = maxf(shake, 2.0)
+			else:
+				fr.vel = Vector2.ZERO
+				fr.rotv = 0.0
+				fr.life = minf(fr.life, 0.6)
+	frags = frags.filter(func(fr): return fr.life > 0.0)
 	# dusk falls into night with time and violence; a devoured sun ends the argument
 	night_f = 1.0 if sun_eaten else clampf(maxf(t / 160.0, threat / 75.0) + 0.12, 0.12, 1.0)
 	if not over:
@@ -993,7 +1041,7 @@ func _people(delta: float) -> void:
 				if rd < rb.w * 0.5 + 6.0:
 					rb.hp -= 1.6 * delta
 					score_f += 1.2 * delta * combo * TIER_MULT[tier]
-					meter = minf(100.0, meter + 0.5 * delta)
+					_feed("fear", 0.7 * delta)
 					if randf() < 0.5 * delta:
 						_boom(Vector2(p.pos.x, -6), 2, Color(1.4, 0.6, 1.2), 40.0)
 					if rb.hp <= 0.0:
@@ -1009,6 +1057,13 @@ func _people(delta: float) -> void:
 		else:
 			p.vx = sin(t * 0.6 + p.o) * 9.0
 		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, WORLD_W - 320)
+	# terror is a meal — panicking minds bleed fear
+	var afraid := 0
+	for p in people:
+		if p.get("panic", false) and absf(p.pos.x - pos.x) < 280.0:
+			afraid += 1
+	if afraid > 0:
+		_feed("fear", afraid * 0.12 * delta)
 	people = people.filter(func(p): return not p.get("dead", false))
 	# critters scatter
 	for cr in critters:
@@ -1201,7 +1256,7 @@ func _tendrils(delta: float) -> void:
 					p.dead = true
 					var gain := int(20.0 * combo * TIER_MULT[tier])
 					score_f += gain
-					bio += 2.0
+					_feed("flesh", 2.5)
 					combo = minf(9.5, combo + 0.12)
 					combo_idle = 0.0
 					hp = minf(100.0, hp + 0.8)
@@ -1403,8 +1458,8 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 			_ignite(b, (4.5 if nodes.has("overcharge") else 2.5) * power)
 			var gain: float = 75.0 * power * 1.6 * combo * TIER_MULT[tier]
 			score_f += gain
-			bio += 9.0 * power
-			meter = minf(100.0, meter + 9.0 * power)
+			_feed("charge", 9.0 * power)
+			pass
 			combo = minf(9.5, combo + 0.3)
 			_chunks(hit, 6)
 			_pop(hit + Vector2(0, -12), "+%d" % int(gain), Color("#aaddff"))
@@ -1421,8 +1476,8 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 		if Vector2(pe.pos.x, -4).distance_to(p) < 24.0 * power:
 			pe.dead = true
 			score_f += 20.0 * combo * TIER_MULT[tier]
-			bio += 2.0
-			meter = minf(100.0, meter + 2.0)
+			_feed("flesh", 2.5)
+			pass
 			_mist(Vector2(pe.pos.x, -5))
 	_hit_props(p, 26.0 * power)
 
@@ -1431,6 +1486,8 @@ func _skyfall(p: Vector2) -> void:
 	var w_col: float = 26.0 if nodes.has("annihilate") else 16.0
 	bolts.append({"from": Vector2(p.x, -370), "to": Vector2(p.x, 0), "t_left": 0.3})
 	parts.append({"pos": Vector2(p.x, -60), "vel": Vector2.ZERO, "life": 0.3, "col": Color(2.2, 2.4, 2.8), "flash": true, "size": 34.0})
+	parts.append({"pos": Vector2(p.x, -8), "vel": Vector2.ZERO, "life": 0.5, "col": Color(1.6, 2.0, 2.6), "ring": true, "size": 8.0})
+	flash_t = maxf(flash_t, 0.5)
 	shake = 18.0
 	_sfx("skyfall")
 	threat = minf(100.0, threat + 4.0)
@@ -1445,7 +1502,7 @@ func _skyfall(p: Vector2) -> void:
 			b.hp -= 260.0
 			_ignite(b, 5.0)
 			score_f += 260.0 * combo * TIER_MULT[tier]
-			bio += 20.0
+			_feed("charge", 20.0)
 			if b.hp <= 0.0:
 				_collapse(b)
 	for u in units:
@@ -1479,7 +1536,7 @@ func _tzitzi_move(delta: float) -> void:
 	_hit_props(pos, 12.0)   # the serpent's passage devours light and crushes steel
 	if segs.is_empty() or segs[0].distance_to(pos) > 3.0:
 		segs.push_front(pos)
-		while segs.size() > 44:
+		while segs.size() > int(44.0 * growth):
 			segs.pop_back()
 
 func _tzitzi(delta: float) -> void:
@@ -1565,8 +1622,8 @@ func _tzitzi(delta: float) -> void:
 					_ignite(b, 1.2 * delta * 3.0)
 				var gain: float = 5.0 * combo * TIER_MULT[tier] * mult
 				score_f += gain
-				bio += 0.9
-				meter = minf(100.0, meter + 1.0)
+				_feed("light", 1.5)
+				pass
 				combo = minf(9.5, combo + 0.02)
 				if randf() < 0.3:
 					b.holes.append({"p": pos - Vector2(b.x, -b.h), "o": randf() * TAU})
@@ -1585,8 +1642,8 @@ func _tzitzi(delta: float) -> void:
 			if Vector2(pe.pos.x, -4).distance_to(pos) < 12.0:
 				pe.dead = true
 				score_f += 20.0 * combo * TIER_MULT[tier]
-				bio += 2.0
-				meter = minf(100.0, meter + 2.0)
+				_feed("flesh", 2.5)
+				pass
 				_mist(Vector2(pe.pos.x, -5))
 		_hit_props(pos, 18.0)
 	else:
@@ -1672,8 +1729,8 @@ func _madden(u: Dictionary) -> void:
 	u.mad_t = 12.0 + (8.0 if nodes.has("hollowing") else 0.0)
 	combo = minf(9.5, combo + 0.2)
 	combo_idle = 0.0
-	meter = minf(100.0, meter + 6.0)
-	bio += 4.0
+	_feed("fear", 7.0)
+	pass
 	score_f += 60.0 * combo * TIER_MULT[tier]
 	_pop(u.pos + Vector2(0, -18), "MADNESS", Color(1.6, 0.5, 1.5))
 	_boom(u.pos + Vector2(0, -10), 6, Color(1.4, 0.5, 1.4), 60.0)
@@ -1734,8 +1791,8 @@ func _rise(p: Vector2, armed: bool) -> void:
 		"hp": 4 if armed else 2, "cd": 0.0,
 		"life": 1e9 if nodes.has("endless") else 25.0})
 	_mist(p)
-	meter = minf(100.0, meter + 4.0)
-	bio += 3.0
+	_feed("death", 4.5)
+	pass
 
 func _allies_update(delta: float) -> void:
 	for a in allies:
@@ -1822,7 +1879,7 @@ func _allies_update(delta: float) -> void:
 				elif randf() < 0.5 * delta:
 					pe.dead = true
 					score_f += 15.0 * combo * TIER_MULT[tier]
-					meter = minf(100.0, meter + 1.5)
+					_feed("fear", 2.0)
 					_mist(Vector2(pe.pos.x, -4))
 	flood = flood.filter(func(fz): return fz.t_left > 0.0)
 	people = people.filter(func(pe): return not pe.get("dead", false))
@@ -1922,7 +1979,7 @@ func _rmb_active() -> void:
 			if d.length() < hit_r and absf(angle_difference(d.angle(), lash.ang)) < 1.1:
 				p.dead = true
 				score_f += 20.0 * combo * TIER_MULT[tier]
-				bio += 2.0
+				_feed("flesh", 2.5)
 				_mist(Vector2(p.pos.x, -5))
 		for k in 3:
 			_hit_props(pos + Vector2.from_angle(lash.ang + (k - 1) * 0.5) * hit_r * 0.8, 12.0)
@@ -1935,7 +1992,7 @@ func _rmb_active() -> void:
 					_carve(b, probe, 8.0)
 					b.hp -= 8.0
 					score_f += 8.0 * combo * TIER_MULT[tier]
-					bio += 3.0
+					_feed("flesh", 2.5)
 					if b.hp <= 0.0:
 						_collapse(b)
 		shake = maxf(shake, 4.0)
@@ -1962,9 +2019,25 @@ func _ignite(b: Dictionary, amt: float) -> void:
 func _collapse(b: Dictionary) -> void:
 	if b.dying > 0.0 or b.dead:
 		return
-	b.dying = 0.6
+	b.dying = 0.28
 	_hitstop(300 if b.cit else 110, 0.15 if b.cit else 0.3)
+	flash_t = maxf(flash_t, 0.55 if b.cit else 0.3)
 	var cx: float = b.x + b.w * 0.5
+	# the building BREAKS — great slabs of it tumble out
+	var img_h2: float = b.img.get_height()
+	var n_frag: int = 3 + int(b.w / 30.0)
+	for i in n_frag:
+		var fw: float = b.w / n_frag
+		var fh: float = b.cur_h * randf_range(0.25, 0.5)
+		var fy: float = randf_range(0.0, b.cur_h - fh)
+		frags.append({"tex": b.tex,
+			"src": Rect2(fw / b.sc * i, (img_h2 - (fy + fh) / b.sc), fw / b.sc, fh / b.sc),
+			"pos": Vector2(b.x + fw * (i + 0.5), -(fy + fh * 0.5)),
+			"vel": Vector2((i - n_frag * 0.5) * randf_range(18, 42), randf_range(-70, -10)),
+			"rot": 0.0, "rotv": randf_range(-2.5, 2.5), "w": fw, "h": fh, "life": randf_range(1.4, 2.2)})
+	# expanding shockwave ring
+	parts.append({"pos": Vector2(cx, -4), "vel": Vector2.ZERO, "life": 0.5, "col": Color(1.6, 1.3, 1.0),
+		"ring": true, "size": 6.0})
 	# heavy masonry flung out — physical chunks that bounce and crush
 	for i in 3 + int(b.w / 18.0):
 		parts.append({"pos": Vector2(b.x + randf() * b.w, -b.cur_h * randf_range(0.3, 0.9)),
@@ -2026,8 +2099,8 @@ func _hit_props(p: Vector2, r: float) -> void:
 			bus.dead = true
 			var gain := int(300.0 * combo * TIER_MULT[tier] * 2.0)
 			score_f += gain
-			bio += 12.0
-			meter = minf(100.0, meter + 10.0)
+			_feed("flesh", 14.0)
+			pass
 			hp = minf(100.0, hp + 4.0)
 			for i in 8:
 				_mist(Vector2(bus.x + randf_range(-10, 10), -6))
@@ -2045,7 +2118,7 @@ func _hit_props(p: Vector2, r: float) -> void:
 			continue
 		cr.dead = true
 		score_f += 12.0 * combo * TIER_MULT[tier]
-		bio += 1.5
+		_feed("flesh", 1.5)
 		if cr.kind == "pigeon":
 			for i in 6:
 				parts.append({"pos": cr.pos + Vector2(0, -3), "vel": Vector2(randf_range(-30, 30), randf_range(-40, -8)),
@@ -2059,15 +2132,15 @@ func _hit_props(p: Vector2, r: float) -> void:
 		l.dead = true
 		score_f += 15.0 * combo * TIER_MULT[tier]
 		_boom(Vector2(l.x, -24), 8, Color(2.0, 1.7, 0.9), 80.0)
+		_feed("light", 8.0)
 		if character == "tzitzimitl":
-			meter = minf(100.0, meter + 10.0)   # light devoured
 			_pop(Vector2(l.x, -30), "LIGHT DEVOURED", Color(1.9, 1.4, 0.5))
 	for c in cars:
 		if c.dead or absf(c.x + c.w * 0.5 - p.x) > r + c.w * 0.5 or p.y < -20.0:
 			continue
 		c.dead = true
 		score_f += 40.0 * combo * TIER_MULT[tier]
-		bio += 3.0
+		_feed("charge", 3.0)
 		_explode(Vector2(c.x + c.w * 0.5, -5), "car")
 		for b in buildings:
 			if not b.dead and b.dying <= 0.0 and c.x + c.w * 0.5 >= b.x and c.x <= b.x + b.w:
@@ -2090,7 +2163,7 @@ func _chew(b: Dictionary, delta: float) -> void:
 	threat = min(100.0, threat + bite * 0.06)
 	combo_idle = 0.0
 	score_f += bite * 1.6 * combo * TIER_MULT[tier]
-	bio += bite * 0.5
+	_feed("mass", bite * 0.5)
 	if bite_cd <= 0.0:
 		# slower, heavier bites — each one tears a real wound
 		bite_cd = 0.42 if maul else 0.32
@@ -2301,7 +2374,7 @@ func _kill_unit(u: Dictionary) -> void:
 		_: base = 300
 	var gain := int(base * combo * TIER_MULT[tier])
 	score_f += gain
-	bio += 20.0 if u.kind == "tank" else 12.0
+	_feed("death", 20.0 if u.kind == "tank" else 12.0)
 	combo = minf(9.5, combo + (0.6 if nodes.has("cloud") else 0.3))
 	combo_idle = 0.0
 	hp = minf(100.0, hp + (6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0))
@@ -2315,6 +2388,8 @@ func _kill_unit(u: Dictionary) -> void:
 func _explode(p: Vector2, kind: String) -> void:
 	_sfx("boom")
 	parts.append({"pos": p, "vel": Vector2.ZERO, "life": 0.22, "col": Color(2.6, 1.8, 0.9), "flash": true, "size": 16.0})
+	parts.append({"pos": p, "vel": Vector2.ZERO, "life": 0.5, "col": Color(2.0, 1.4, 0.7), "ring": true, "size": 4.0})
+	flash_t = maxf(flash_t, 0.15)
 	for i in 26:
 		var a := randf() * TAU
 		parts.append({"pos": p, "vel": Vector2(cos(a), sin(a)) * randf_range(20, 120) + Vector2(0, -40),
@@ -2337,7 +2412,8 @@ func _mist(p: Vector2) -> void:
 func _chunks(p: Vector2, n: int) -> void:
 	for i in n:
 		parts.append({"pos": p, "vel": Vector2(randf_range(-50, 50), randf_range(-80, -10)),
-			"life": randf_range(0.9, 1.9), "col": Color("#4a3a4a"), "size": randf_range(2.5, 4.5), "chunk": true})
+			"life": randf_range(0.9, 1.9), "col": Color("#4a3a4a"), "size": randf_range(2.5, 4.5),
+			"chunk": true, "rot": randf() * TAU, "rotv": randf_range(-6.0, 6.0)})
 
 func _army(delta: float) -> void:
 	var defense: float = city_def.defense
@@ -2782,6 +2858,9 @@ func _draw() -> void:
 	# atmosphere: ground haze + bottom vignette
 	draw_rect(Rect2(left, -30, right - left, 34), Color(0.3, 0.12, 0.3, 0.08))
 	draw_rect(Rect2(left, 14, right - left, 400), Color(0.01, 0.0, 0.03, 0.55))
+	# impact flash — the whole world blinks white
+	if flash_t > 0.0:
+		draw_rect(Rect2(left, -540, right - left, 940), Color(1.0, 0.97, 0.9, flash_t * 0.3))
 
 const DUSK_SKY := [Color("#3a2a50"), Color("#7a3a50"), Color("#c05a3c"), Color("#e8924e"), Color("#f8c877")]
 
@@ -3136,9 +3215,20 @@ func _draw_actors() -> void:
 	for s in shells:
 		var sc: Color = Color(2.4, 1.9, 0.7) if s.heavy else Color(2.0, 1.6, 0.6)
 		draw_rect(Rect2(s.pos.x - 1, s.pos.y - 1, 3 if s.heavy else 2, 3 if s.heavy else 2), sc)
+	# tumbling building fragments — behind particles, over buildings
+	for fr in frags:
+		var fa: float = clampf(fr.life * 1.8, 0.0, 1.0)
+		draw_set_transform(fr.pos, fr.rot, Vector2.ONE)
+		draw_texture_rect_region(fr.tex, Rect2(-fr.w * 0.5, -fr.h * 0.5, fr.w, fr.h), fr.src,
+			Color(0.9, 0.85, 0.9, fa))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	for p in parts:
 		var a: float = clampf(p.life * 2.5, 0.0, 1.0)
-		if p.get("flash", false):
+		if p.get("ring", false):
+			var rr2: float = p.size + (0.5 - p.life) * 160.0
+			draw_arc(p.pos, maxf(1.0, rr2), 0, TAU, 40, Color(p.col.r, p.col.g, p.col.b, a * 0.5), 2.5)
+			draw_arc(p.pos, maxf(1.0, rr2 * 0.8), 0, TAU, 40, Color(p.col.r, p.col.g, p.col.b, a * 0.25), 4.0)
+		elif p.get("flash", false):
 			draw_circle(p.pos, p.size * (1.0 + (0.22 - p.life) * 8.0), Color(p.col.r, p.col.g, p.col.b, a * 0.7))
 		elif p.get("fire", false) and not p.get("smoke", false):
 			# real flame: glow + tongue that flickers and tapers as it dies
@@ -3153,6 +3243,13 @@ func _draw_actors() -> void:
 				p.pos + Vector2(0.9, 1.0)]), Color(2.3, 1.6, 0.5, a))
 		elif p.get("smoke", false):
 			draw_circle(p.pos, p.get("size", 2.0) * (1.6 - p.life * 0.5), Color(0.16, 0.14, 0.16, a * 0.35))
+		elif p.get("chunk", false):
+			var sz: float = p.get("size", 2.0)
+			p.rot = p.get("rot", 0.0) + p.get("rotv", 0.0) * 0.016
+			draw_set_transform(p.pos, p.rot, Vector2.ONE)
+			draw_rect(Rect2(-sz * 0.5, -sz * 0.5, sz, sz), Color(p.col.r, p.col.g, p.col.b, a))
+			draw_rect(Rect2(-sz * 0.5, -sz * 0.5, sz, sz * 0.35), Color(p.col.lightened(0.2).r, p.col.lightened(0.2).g, p.col.lightened(0.2).b, a))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			var sz: float = p.get("size", 2.0)
 			draw_rect(Rect2(p.pos.x, p.pos.y, sz, sz), Color(p.col.r, p.col.g, p.col.b, a))
@@ -3241,7 +3338,7 @@ func _draw_keraunos() -> void:
 			draw_line(prev, npt, Color(0.7, 1.2, 2.2, a * 0.5), 5.0)
 			prev = npt
 	# ===== the colossus: Ghidorah-scale storm hydra (1.5x transform) =====
-	draw_set_transform(-0.5 * pos, 0.0, Vector2(1.5, 1.5))
+	draw_set_transform(pos * (1.0 - 1.5 * growth), 0.0, Vector2(1.5 * growth, 1.5 * growth))
 	var facing: float = signf(aim.x - pos.x)
 	if facing == 0.0:
 		facing = 1.0
@@ -3351,13 +3448,13 @@ func _draw_tzitzi() -> void:
 		var pn: Vector2 = segs[maxi(0, i - 2)]
 		var seg_ang: float = (pn - p).angle() if pn.distance_to(p) > 0.3 else 0.0
 		var f := 1.0 - float(i) / n
-		var s := 0.55 + sin(f * PI) ** 0.8 * 0.75
+		var s := (0.55 + sin(f * PI) ** 0.8 * 0.75) * growth
 		draw_set_transform(p, seg_ang, Vector2(s, s))
 		draw_texture(serp_body, Vector2(-7, -9), body_mod)
 	# head
 	var hang := (aim - pos).angle()
 	var hflip: float = 1.0 if absf(angle_difference(hang, 0.0)) < PI * 0.5 else -1.0
-	draw_set_transform(pos, hang, Vector2(1.25, 1.25 * hflip))
+	draw_set_transform(pos, hang, Vector2(1.25 * growth, 1.25 * growth * hflip))
 	draw_texture(serp_head, Vector2(-11, -10), body_mod)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if dive_t > 0.0:
@@ -3506,7 +3603,7 @@ func _draw_drowned() -> void:
 	if randf() < 0.15:
 		parts.append({"pos": pos + Vector2(randf_range(-14, 14), randf_range(-24, -4)), "vel": Vector2(0, 30),
 			"life": 0.5, "col": Color(0.4, 0.8, 0.9, 0.6), "size": 1.2})
-	draw_set_transform(pos + Vector2(0, 2), 0.0, Vector2(1.4 * facing, 1.4))
+	draw_set_transform(pos + Vector2(0, 2), 0.0, Vector2(1.4 * facing * growth, 1.4 * growth))
 	draw_texture(tex_drowned, Vector2(-18, -30), Color(1, 1, 1))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# bob glow of the eye-lights
@@ -3529,7 +3626,7 @@ func _draw_rider() -> void:
 		parts.append({"pos": pos + Vector2(randf_range(-30, 30), randf_range(-8, -2)), "vel": Vector2(randf_range(-4, 4), -6),
 			"life": 1.4, "col": Color(0.55, 0.7, 0.3, 0.4), "size": 2.5, "fire": true, "smoke": true})
 	var gait: float = absf(sin(t * 6.0)) * 1.5 if absf(vel.x) > 10.0 else 0.0
-	draw_set_transform(pos + Vector2(0, -gait), 0.0, Vector2(1.3 * facing, 1.3))
+	draw_set_transform(pos + Vector2(0, -gait), 0.0, Vector2(1.3 * facing * growth, 1.3 * growth))
 	draw_texture(tex_rider, Vector2(-17, -28), Color(1, 1, 1))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
