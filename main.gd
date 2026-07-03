@@ -115,12 +115,25 @@ var combo_pulse := 0.0
 var prev_combo := 1.0
 var hitstop_until := 0
 var letterbox := 0.0
+# arrival cinematic
+const INTRO_LEN := 2.6
+var intro_t := 0.0
+var intro_from := Vector2.ZERO
+var intro_to := Vector2.ZERO
+const ARRIVE_LINES := {
+	"swarm": "THE SWARM DESCENDS",
+	"keraunos": "KERAUNOS COMES WITH THE STORM",
+	"tzitzimitl": "TZITZIMITL UNCOILS ACROSS THE SKY",
+	"drowned": "THE DROWNED ONE RISES",
+	"rider": "THE PALE RIDER IS AT THE GATES",
+}
 var ambient: Array = []          # drifting embers/dust
 var frags: Array = []            # tumbling building fragments
 var flash_t := 0.0               # white screen flash on big events
 # --- essence: each god feeds on something different ---
 var essence_eaten := 0.0         # lifetime total -> growth
 var growth := 1.0                # body scale multiplier
+var growth_mult := 1.0           # stage scale: prologue whelp / act-1 ramp / relics
 # --- crusade node state ---
 var node_kind := "city"          # hamlet | town | city | capital
 var tier_cap := 5
@@ -169,7 +182,7 @@ func _feed(kind: String, amt: float) -> void:
 	meter = minf(100.0, meter + gain * 0.55)
 	essence_eaten += gain
 	# growth: the more you consume of YOUR hunger, the bigger you get
-	growth = 1.0 + minf(0.75, essence_eaten / 900.0)
+	growth = minf(1.75, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 
 var _shot_frames := 0
 
@@ -198,7 +211,8 @@ func _ready() -> void:
 	cam.make_current()
 	match character:
 		"keraunos":
-			cam.zoom = Vector2(0.55, 0.55)   # pull back — he is COLOSSAL
+			# pull back — he is COLOSSAL. villages vanish at 0.55, so pull back less there
+			cam.zoom = Vector2(0.72, 0.72) if node_kind in ["hamlet", "town", "prologue"] else Vector2(0.55, 0.55)
 			radius = 52.0
 			dmg_taken_mult = 0.7
 			pos.y = -190.0
@@ -229,6 +243,8 @@ func _ready() -> void:
 	_build_hud()
 	if prologue:
 		_caption(prol_beats[0].cap, false)
+	elif OS.get_environment("CAL_SHOT") == "" or OS.get_environment("CAL_INTRO") != "":
+		_start_intro()
 
 func _bake_serpent() -> void:
 	# hand-baked pixel sprites, drawn once — outline + shading like real sheet art
@@ -469,6 +485,7 @@ func _apply_campaign() -> void:
 		prologue = true
 		has_citadel = false
 		tier_cap = 0
+		growth_mult = 0.5
 		growth = 0.5
 		_setup_prologue()
 		return
@@ -477,10 +494,9 @@ func _apply_campaign() -> void:
 	nodes = Global.c_nodes.duplicate()
 	bio_stage = Global.c_bio_stage
 	essence_eaten = Global.c_essence
-	growth = 1.0 + minf(0.75, essence_eaten / 900.0)
 	# act 1 starts you SMALL — a whisper of what you'll be
 	if Global.act == 1:
-		growth = maxf(0.7, growth * [0.7, 0.85, 1.0][mini(2, Global.node_i)])
+		growth_mult = [0.7, 0.85, 1.0][mini(2, Global.node_i)]
 	_apply_branch_stats()
 	# relics
 	for rl in Global.relics:
@@ -493,8 +509,9 @@ func _apply_campaign() -> void:
 			"locustyears": essence_mult = 1.25
 			"dreadname": threat_mult *= 0.8
 			"warfeast": heal_mult = 2.0
-			"longshadow": growth = minf(1.75, growth + 0.1)
+			"longshadow": growth_mult += 0.1
 			"carrionwind": tribute_mult = 1.3
+	growth = minf(1.75, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 	# small settlements: no citadel, gentler mixes
 	essence_start = essence_eaten
 	if objective == "decapitation":
@@ -529,6 +546,23 @@ const PROLOGUE_DEFS := {
 		{"goal": "essence", "n": 50, "cap": "Nothing that burns is ever really gone.\nThe village learns this now. The world learns next."}]},
 }
 
+func _start_intro() -> void:
+	intro_t = INTRO_LEN
+	intro_to = pos
+	var off := Vector2(-420.0, 0.0)
+	match character:
+		"keraunos": off = Vector2(-460.0, -110.0)
+		"tzitzimitl": off = Vector2(-460.0, -70.0)
+		"drowned": off = Vector2(-300.0, 46.0)
+		"rider": off = Vector2(-360.0, 0.0)
+	intro_from = intro_to + off
+	pos = intro_from
+	vel = Vector2.ZERO
+	letterbox = 1.0
+	hud.msg.text = city_def.get("name", Global.city.to_upper())
+	hud.sub.text = ARRIVE_LINES.get(character, "")
+	cam.position = Vector2(clampf(intro_from.x, 320.0, world_w - 320.0), -105)
+
 func _setup_prologue() -> void:
 	var pd: Dictionary = PROLOGUE_DEFS[character]
 	Global.city = pd.city
@@ -547,6 +581,16 @@ func _prologue_check() -> void:
 	if prol_i >= prol_beats.size() or caption_layer != null:
 		return
 	var beat: Dictionary = prol_beats[prol_i]
+	# madden/kills beats need live minds — if the watch is gone, more come looking
+	if beat.goal in ["madden", "kills"]:
+		var live := 0
+		for u in units:
+			if u.kind in ["police", "soldier"] and not u.get("mad", false) and not u.get("dead", false):
+				live += 1
+		if live == 0:
+			for i in 3:
+				units.append({"kind": "police", "pos": Vector2(pos.x + 120.0 + i * 26.0, 0),
+					"cd": randf_range(0.6, 1.2), "hp": 1})
 	var progress: float = 0.0
 	match beat.goal:
 		"people": progress = people_killed
@@ -559,7 +603,8 @@ func _prologue_check() -> void:
 	hud.obj.text = "%s — %d / %d" % [beat.goal.to_upper(), int(progress), beat.n]
 	if progress >= beat.n:
 		prol_i += 1
-		growth = minf(1.0, growth + 0.18)
+		growth_mult = minf(1.0, growth_mult + 0.18)
+		growth = minf(1.75, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 		_sfx("pick")
 		if prol_i < prol_beats.size():
 			_caption(prol_beats[prol_i].cap, false)
@@ -922,6 +967,8 @@ func _build_city() -> void:
 		banner_imgs.append(im)
 	var x := 380.0
 	var i := 0
+	# villages build bigger cottages — 26px shacks vanish at combat zoom
+	var vsc: float = 1.6 if node_kind in ["hamlet", "town", "prologue"] else 1.0
 	while x < world_w - 620.0:
 		var kind := _pick_kind()
 		if kind == "tower":
@@ -938,13 +985,13 @@ func _build_city() -> void:
 					hi = _gen_lowrise("house")
 				else:
 					hi = house_imgs[randi() % house_imgs.size()]
-				buildings.append(_mk_building(x, hi, 1.0, false, "house"))
-				x += hi.get_width() + randf_range(4, 10)
+				buildings.append(_mk_building(x, hi, vsc, false, "house"))
+				x += hi.get_width() * vsc + randf_range(4, 10)
 			x += randf_range(city_def.gap_min, city_def.gap_max)
 		else:
 			var li := _gen_lowrise(kind)
-			buildings.append(_mk_building(x, li, 1.0, false, kind))
-			x += li.get_width() + randf_range(city_def.gap_min, city_def.gap_max)
+			buildings.append(_mk_building(x, li, vsc, false, kind))
+			x += li.get_width() * vsc + randf_range(city_def.gap_min, city_def.gap_max)
 	# citadel: biggest facade at 2x
 	var big_i := 0
 	for j in facades.size():
@@ -1066,6 +1113,27 @@ func _process(delta: float) -> void:
 		if _shot_frames == 130:
 			get_viewport().get_texture().get_image().save_png(OS.get_environment("CAL_SHOT"))
 			get_tree().quit()
+	# arrival — the calamity walks in before the war starts
+	if intro_t > 0.0:
+		intro_t -= delta
+		var kk: float = clampf(1.0 - intro_t / INTRO_LEN, 0.0, 1.0)
+		pos = intro_from.lerp(intro_to, 1.0 - pow(1.0 - kk, 3.0))
+		if character == "tzitzimitl":
+			for i in segs.size():
+				segs[i] = pos + Vector2(-(i + 1) * 9.0, sin(t * 2.0 + i * 0.6) * 4.0)
+		cam.position = cam.position.lerp(Vector2(pos.x, -105), 4.0 * delta)
+		cam.position.x = clampf(cam.position.x, 320, world_w - 320)
+		swarm_light.position = pos
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or intro_t <= 0.0:
+			intro_t = 0.0
+			pos = intro_to
+			letterbox = 0.0
+			hud.msg.text = ""
+			hud.sub.text = ""
+			lmb_prev = true
+		_hud_update()
+		queue_redraw()
+		return
 	# spore pods gnaw on their own
 	for pod in pods:
 		pod.t_left -= delta
@@ -1400,6 +1468,9 @@ var allies: Array = []           # {kind, pos, hp, cd, life}
 var lmb_cd := 0.0
 var rally := Vector2.ZERO
 var has_rally := false
+var e_prev := false
+var scythe_t := 0.0
+var scythe_ang := 0.0
 var flood: Array = []            # water zones {x0, x1, t_left}
 var trail_cd := 0.0
 var tex_drowned: Texture2D
@@ -1982,13 +2053,15 @@ func _madden(u: Dictionary) -> void:
 func _rider(delta: float) -> void:
 	lmb_cd -= delta
 	rmb_cd -= delta
+	scythe_t = maxf(0.0, scythe_t - delta)
 	# infection aura — the fog takes them
+	var fog_r: float = 55.0 * growth
 	for pe in people:
-		if not pe.has("inf") and Vector2(pe.pos.x, -4).distance_to(pos) < 55.0:
+		if not pe.has("inf") and Vector2(pe.pos.x, -4).distance_to(pos) < fog_r:
 			pe.inf = t + 4.0
 	for u in units:
 		if u.kind in ["police", "soldier"] and not u.has("inf") and not u.get("mad", false):
-			if (u.pos + Vector2(0, -8)).distance_to(pos) < 42.0:
+			if (u.pos + Vector2(0, -8)).distance_to(pos) < fog_r * 0.76:
 				u.inf = t + 8.0
 	# blightlord: painted plague ground
 	if branch == "blight":
@@ -1998,11 +2071,62 @@ func _rider(delta: float) -> void:
 			flood.append({"x0": pos.x - (26.0 if nodes.has("miasma") else 16.0),
 				"x1": pos.x + (26.0 if nodes.has("miasma") else 16.0),
 				"t_left": (40.0 if nodes.has("spores") else 20.0), "plague": true})
-	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	if lmb and not lmb_prev:
+	# E — rally the dead
+	var ek := Input.is_physical_key_pressed(KEY_E)
+	if ek and not e_prev:
 		rally = aim
 		has_rally = true
 		_pop(aim, "^", Color(1.5, 1.4, 0.8))
+	e_prev = ek
+	# SCYTHE — the pale blade arcs where you point
+	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if lmb and not lmb_prev and lmb_cd <= 0.0:
+		lmb_cd = 0.8
+		var o: Vector2 = pos + Vector2(0, -10)
+		var reach: float = 52.0 * growth
+		scythe_ang = (aim - o).angle()
+		scythe_t = 0.18
+		_sfx("lash")
+		shake = maxf(shake, 3.0)
+		for u in units:
+			if u.kind == "carcass":
+				continue
+			var d2: Vector2 = u.pos + Vector2(0, -8) - o
+			if d2.length() < reach and absf(angle_difference(d2.angle(), scythe_ang)) < 0.95:
+				u.hp = u.get("hp", 1) - 2
+				_boom(u.pos + Vector2(0, -8), 6, Color(0.85, 0.9, 0.65), 70.0)
+				if u.hp <= 0:
+					u.dead = true
+					_kill_unit(u)
+					_rise(u.pos, branch == "crown")
+				else:
+					u.inf = t + 3.0
+		units = units.filter(func(u2): return not u2.get("dead", false))
+		for pe in people:
+			var dp: Vector2 = Vector2(pe.pos.x, -4) - o
+			if dp.length() < reach and absf(angle_difference(dp.angle(), scythe_ang)) < 0.95:
+				pe.dead = true
+				score_f += 20.0 * combo * TIER_MULT[tier]
+				_feed("death", 2.0)
+				_mist(Vector2(pe.pos.x, -5))
+				_rise(Vector2(pe.pos.x, -4), false)
+		people = people.filter(func(pe2): return not pe2.get("dead", false))
+		# the blade carves masonry too
+		for b in buildings:
+			if b.dead or b.dying > 0.0:
+				continue
+			var tip: Vector2 = o + Vector2.from_angle(scythe_ang) * reach * 0.8
+			if tip.x > b.x - 4.0 and tip.x < b.x + b.w + 4.0 and tip.y > -b.cur_h - 8.0:
+				b.hp -= 5.0
+				for k in 3:
+					_carve(b, o + Vector2.from_angle(scythe_ang + (k - 1) * 0.3) * reach * randf_range(0.55, 0.95),
+						randf_range(2.5, 4.0))
+				_feed("mass", 1.2)
+				score_f += 6.0 * combo * TIER_MULT[tier]
+				shake = maxf(shake, 5.0)
+				if b.hp <= 0.0:
+					_collapse(b)
+				break
 	# REAPING — every infected thing dies and rises NOW
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= 80.0:
 		rmb_cd = 1.5
@@ -2056,8 +2180,22 @@ func _allies_update(delta: float) -> void:
 				pd = d
 				prey = u
 		var goto: Vector2
+		# idle risen tear the town down (near the rally point if one is set)
+		var raze_b = null
+		if prey == null and a.kind in ["risen", "risen_soldier"] \
+				and (not has_rally or absf(a.pos.x - rally.x) <= 60.0):
+			var rbd := 1e9
+			for b in buildings:
+				if b.dead or b.dying > 0.0:
+					continue
+				var dbx: float = absf(b.x + b.w * 0.5 - a.pos.x)
+				if dbx < rbd:
+					rbd = dbx
+					raze_b = b
 		if prey != null:
 			goto = prey.pos
+		elif raze_b != null:
+			goto = Vector2(raze_b.x + raze_b.w * 0.5, -4)
 		elif has_rally:
 			goto = rally
 		else:
@@ -2095,6 +2233,17 @@ func _allies_update(delta: float) -> void:
 						if prey.hp <= 0:
 							prey.dead = true
 							_kill_unit(prey)
+		# dead hands against the walls
+		if raze_b != null and a.cd <= 0.0 and absf(a.pos.x - (raze_b.x + raze_b.w * 0.5)) < raze_b.w * 0.5 + 8.0:
+			a.cd = 1.0
+			raze_b.hp -= 1.5
+			_carve(raze_b, Vector2(a.pos.x + randf_range(-5, 5), randf_range(-16.0, -4.0)), randf_range(2.0, 3.5))
+			score_f += 2.0 * combo * TIER_MULT[tier]
+			_feed("death", 0.35)
+			if randf() < 0.4:
+				_boom(Vector2(a.pos.x, -10), 3, Color(0.7, 0.75, 0.6), 50.0)
+			if raze_b.hp <= 0.0:
+				_collapse(raze_b)
 		# risen martyrs detonate
 		if a.life <= 0.0 and nodes.has("martyrs") and a.kind in ["risen", "risen_soldier"]:
 			_shockwave(a.pos + Vector2(0, -6), 26.0)
@@ -2265,6 +2414,13 @@ func _collapse(b: Dictionary) -> void:
 		return
 	b.dying = 0.28
 	buildings_razed += 1
+	# the crowd beneath does not escape
+	for pe in people:
+		if pe.pos.x > b.x - 12.0 and pe.pos.x < b.x + b.w + 12.0:
+			pe.dead = true
+			score_f += 20.0 * combo * TIER_MULT[tier]
+			_feed("flesh", 1.0)
+			_mist(Vector2(pe.pos.x, -5))
 	_hitstop(300 if b.cit else 110, 0.15 if b.cit else 0.3)
 	flash_t = maxf(flash_t, 0.55 if b.cit else 0.3)
 	var cx: float = b.x + b.w * 0.5
@@ -3062,7 +3218,7 @@ func _build_hud() -> void:
 		"drowned":
 			help.text = "A/D — wade, W — lurch.  LMB — madden a mind (units turn, crowds riot).  RMB — call the fishmen.  ESC — menu."
 		"rider":
-			help.text = "A/D — ride, W — rear.  your fog infects all near.  LMB — rally the dead.  RMB — REAPING.  ESC — menu."
+			help.text = "A/D — ride, W — rear.  fog infects all near.  LMB — scythe.  E — rally the dead.  RMB — REAPING.  ESC — menu."
 		_:
 			help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / evolved skill.  R — restart.  ESC — menu."
 
@@ -3119,7 +3275,7 @@ func _hud_update() -> void:
 	hud.lb_bot.size.y = 44.0 * letterbox
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
-	if Global.mode == "crusade":
+	if Global.mode == "crusade" and not prologue:
 		match objective:
 			"decapitation": hud.obj.text = "OBJECTIVE: TOPPLE THE CITADEL — %ds" % int(maxf(0, obj_timer))
 			"extinction": hud.obj.text = "OBJECTIVE: EXTINCTION — %d / %d" % [people_killed, int(people_total * 0.85)]
@@ -3319,6 +3475,32 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 		draw_circle(moon + Vector2(mr * 0.3, mr * 0.25), mr * 0.2, Color(mc.darkened(0.2).r, mc.darkened(0.2).g, mc.darkened(0.2).b, ma))
 
 func _draw_backdrop(left: float, right: float, cx: float) -> void:
+	# villages get hills and pines behind them, not a metropolis skyline
+	if node_kind in ["hamlet", "town", "prologue"]:
+		for lay in [[0.12, 78.0, Color(0.17, 0.14, 0.25)], [0.3, 44.0, Color(0.11, 0.09, 0.17)]]:
+			var f2: float = lay[0]
+			var hgt: float = lay[1]
+			var col: Color = lay[2]
+			var pts := PackedVector2Array([Vector2(left, 0)])
+			var x2: float = left
+			while x2 <= right + 16.0:
+				var s: float = x2 - cx * f2
+				pts.append(Vector2(x2, -hgt - sin(s * 0.011) * hgt * 0.35 - sin(s * 0.031 + 2.0) * hgt * 0.18))
+				x2 += 16.0
+			pts.append(Vector2(right + 16.0, 0))
+			draw_colored_polygon(pts, col)
+		# pine line seated on the near ridge
+		var f3 := 0.3
+		var s2: float = floor((left - cx * f3) / 26.0) * 26.0
+		while s2 < right - cx * f3 + 26.0:
+			var px2: float = s2 + cx * f3
+			var by: float = -44.0 - sin(s2 * 0.011) * 15.4 - sin(s2 * 0.031 + 2.0) * 7.9
+			var th: float = 8.0 + fmod(absf(sin(s2 * 0.717)) * 13.7, 6.0)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(px2 - 4.5, by), Vector2(px2, by - th), Vector2(px2 + 4.5, by)]),
+				Color(0.08, 0.10, 0.13))
+			s2 += 26.0
+		return
 	# city glow band on the horizon (blooms slightly)
 	draw_rect(Rect2(left, -120, right - left, 60), Color(0.5, 0.16, 0.4, 0.10))
 	draw_rect(Rect2(left, -80, right - left, 80), Color(0.85, 0.3, 0.5, 0.14))
@@ -3998,10 +4180,20 @@ func _draw_rider() -> void:
 	var facing: float = signf(aim.x - pos.x)
 	if facing == 0.0:
 		facing = 1.0
-	# plague fog rolls with him
-	for i in 3:
-		var fo := Vector2(sin(t * 0.8 + i * 2.0) * 18.0, -4.0 - i * 3.0)
-		draw_circle(pos + fo, 16.0 + i * 5.0, Color(0.45, 0.55, 0.25, 0.05))
+	# plague fog rolls with him — the aura made visible
+	var fog_r: float = 55.0 * growth
+	for i in 7:
+		var a3: float = t * 0.4 + i * TAU / 7.0
+		var fo := Vector2(cos(a3) * fog_r * 0.7, -6.0 + sin(t * 0.9 + i * 1.7) * 6.0 - i * 1.5)
+		draw_circle(pos + fo, 12.0 + 4.0 * sin(t * 1.3 + i), Color(0.5, 0.6, 0.28, 0.09))
+	draw_arc(pos + Vector2(0, -8), fog_r, 0, TAU, 42, Color(0.7, 0.8, 0.45, 0.10 + 0.04 * sin(t * 2.0)), 1.0)
+	# the scythe flash
+	if scythe_t > 0.0:
+		var o2: Vector2 = pos + Vector2(0, -10)
+		var al: float = scythe_t / 0.18
+		var reach2: float = 52.0 * growth
+		draw_arc(o2, reach2 * 0.85, scythe_ang - 0.95, scythe_ang + 0.95, 18, Color(1.8, 1.7, 1.2, al * 0.8), 3.0)
+		draw_arc(o2, reach2 * 0.65, scythe_ang - 0.7, scythe_ang + 0.7, 14, Color(1.4, 1.4, 1.0, al * 0.4), 2.0)
 	if randf() < 0.2:
 		parts.append({"pos": pos + Vector2(randf_range(-30, 30), randf_range(-8, -2)), "vel": Vector2(randf_range(-4, 4), -6),
 			"life": 1.4, "col": Color(0.55, 0.7, 0.3, 0.4), "size": 2.5, "fire": true, "smoke": true})
