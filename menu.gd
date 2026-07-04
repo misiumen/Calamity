@@ -38,8 +38,9 @@ const PROLOGUE := {
 }
 
 var ui_font: FontFile
-var screen := "root"   # root | char_crusade | char_skirmish | city_skirmish | prologue
+var screen := "root"   # root | char_crusade | char_skirmish | city_skirmish | mutator | prologue
 var picked_char := ""
+var picked_city := ""
 
 func _ready() -> void:
 	Global.music("menu")
@@ -122,11 +123,26 @@ func _build() -> void:
 			for i in CITIES.size():
 				var ci: Dictionary = CITIES[i]
 				_mkbtn(ci.name, 108 + i * 46, func():
+					picked_city = ci.id
+					screen = "mutator"
+					_build())
+				_mklabel(ci.sub, 134 + i * 46, 8, Color("#8890b0"))
+		"mutator":
+			_mklabel("bend the night   [ESC — back]", 84, 10, Color("#9ab0d0"))
+			var muts := [["", "NO MUTATOR", "the city as the gods found it"],
+				["midnight", "MIDNIGHT", "the sun never shows — permanent night"],
+				["glass", "GLASS CITY", "buildings shatter at a touch — 40% weaker"],
+				["mobilization", "FULL MOBILIZATION", "the army arrives fast and keeps coming"],
+				["famine", "FAMINE", "thin feeding — 25% less essence in everything"]]
+			for i in muts.size():
+				var mu: Array = muts[i]
+				_mkbtn(mu[1], 108 + i * 44, func():
 					Global.mode = "skirmish"
 					Global.character = picked_char
-					Global.city = ci.id
+					Global.city = picked_city
+					Global.mutator = mu[0]
 					get_tree().change_scene_to_file("res://main.tscn"))
-				_mklabel(ci.sub, 134 + i * 46, 8, Color("#8890b0"))
+				_mklabel(mu[2], 134 + i * 44, 8, Color("#8890b0"))
 		"prologue":
 			var lines: Array = PROLOGUE[picked_char]
 			for i in lines.size():

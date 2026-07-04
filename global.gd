@@ -4,6 +4,7 @@ extends Node
 var character := "swarm"
 var city := "kowloon"
 var mode := "skirmish"           # "skirmish" | "crusade"
+var mutator := ""                # skirmish modifier: midnight | glass | mobilization | famine
 
 # --- crusade state (persists across nodes; saved to disk) ---
 var act := 1

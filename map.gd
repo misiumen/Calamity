@@ -69,28 +69,33 @@ func _unhandled_input(e: InputEvent) -> void:
 				_launch(n)
 				return
 
+func _obj_for(n: Dictionary) -> String:
+	# deterministic per (node, progress) so the map can promise what the battle delivers
+	match n.kind:
+		"hamlet": return "raze"
+		"town": return ["raze", "blackout", "extinction"][(n.id * 7 + Global.razed.size() * 3) % 3]
+		"capital": return "decapitation"
+		"city": return ["raze", "decapitation", "extinction", "blackout", "terror", "feast"][(n.id * 5 + Global.razed.size()) % 6]
+	return "raze"
+
 func _launch(n: Dictionary) -> void:
 	Global.map_pos = n.id
 	Global.city = n.get("city", ["kowloon", "thornspire", "ashport", "teotl", "maren"][randi() % 5])
 	var alert: int = Global.razed.size()
-	var params := {"map_node": n.id, "alert": alert, "kind": n.kind}
+	var params := {"map_node": n.id, "alert": alert, "kind": n.kind, "objective": _obj_for(n)}
 	match n.kind:
 		"hamlet":
 			params.world_w = 2000.0
 			params.tier_cap = 2 + int(alert / 3.0)
-			params.objective = "raze"
 		"town":
 			params.world_w = 3000.0
 			params.tier_cap = 3 + int(alert / 3.0)
-			params.objective = ["raze", "blackout", "extinction"][randi() % 3]
 		"capital":
 			params.world_w = 5200.0
 			params.tier_cap = 5
 			params.capital = true
-			params.objective = "decapitation"
 		_:
 			params.tier_cap = 5
-			params.objective = ["raze", "decapitation", "extinction", "blackout", "terror", "feast"][randi() % 6]
 	Global.node_params = params
 	Global.save_crusade()
 	get_tree().change_scene_to_file("res://main.tscn")
@@ -189,4 +194,8 @@ func _draw() -> void:
 			draw_line(n.pos + Vector2(-4, 4), n.pos + Vector2(4, -4), Color(0.9, 0.3, 0.2), 1.5)
 		draw_string(f, n.pos + Vector2(0, -r - 5), n.name, HORIZONTAL_ALIGNMENT_CENTER, -1, 7,
 			Color(0.9, 0.85, 0.8, 0.85))
+		# reachable nodes show what the war will ask of you
+		if _reachable(n.id) and n.kind in ["hamlet", "town", "city", "capital"]:
+			draw_string(f, n.pos + Vector2(0, r + 12), _obj_for(n).to_upper(),
+				HORIZONTAL_ALIGNMENT_CENTER, -1, 6, Color(1.5, 1.3, 0.7, 0.8))
 	draw_string(f, Vector2(320, 350), "choose where the ruin goes next", HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(0.7, 0.65, 0.7, 0.6))

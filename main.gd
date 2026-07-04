@@ -204,6 +204,13 @@ func _ready() -> void:
 		_bake_drowned()
 	elif character == "rider":
 		_bake_rider()
+	if Global.mode == "skirmish":
+		match Global.mutator:
+			"mobilization":
+				city_def = city_def.duplicate()
+				city_def.spawn_mult *= 1.7
+			"famine":
+				essence_mult = 0.75
 	_setup_env()
 	_setup_sfx()
 	Global.music("battle", 0)
@@ -728,6 +735,11 @@ func _apply_branch_stats() -> void:
 		eclipse_len = 16.0
 	if nodes.has("blackdawn"):
 		eclipse_len += 8.0
+	# capstone applies last so it stacks on whatever the line set
+	if nodes.has("apotheosis"):
+		growth_mult += 0.15
+		dmg_taken_mult *= 0.8
+		essence_mult *= 1.25
 
 func _flash(p: Vector2, e: float) -> void:
 	flash_light.position = p
@@ -1167,6 +1179,8 @@ func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "to
 	var w: float = img.get_width() * sc
 	var h: float = img.get_height() * sc
 	var mass: float = w * h * (0.020 if cit else 0.012)
+	if Global.mode == "skirmish" and Global.mutator == "glass":
+		mass *= 0.6
 	return {"x": x, "w": w, "h": h, "sc": sc, "img": img,
 		"tex": ImageTexture.create_from_image(img),
 		"hp": mass, "maxhp": mass, "holes": [], "dead": false, "dying": 0.0, "cit": cit,
@@ -1323,7 +1337,8 @@ func _process(delta: float) -> void:
 				fr.life = minf(fr.life, 0.6)
 	frags = frags.filter(func(fr): return fr.life > 0.0)
 	# dusk falls into night with time and violence; a devoured sun ends the argument
-	night_f = 1.0 if sun_eaten else clampf(maxf(t / 160.0, threat / 75.0) + 0.12, 0.12, 1.0)
+	night_f = 1.0 if (sun_eaten or Global.mutator == "midnight") \
+		else clampf(maxf(t / 160.0, threat / 75.0) + 0.12, 0.12, 1.0)
 	run_time += delta
 	if prologue:
 		people_killed = people_total - people.size()
@@ -1625,7 +1640,7 @@ func _people(delta: float) -> void:
 	critters = critters.filter(func(cr): return not cr.dead)
 
 # --- tendril + evolution state ---
-const BIO_THRESH := [180.0, 520.0, 1100.0]
+const BIO_THRESH := [180.0, 520.0, 1100.0, 1900.0, 2800.0]
 var tendril_range := 100.0
 var aim := Vector2.ZERO          # clamped world aim point
 var aim_clamped := false
@@ -1685,6 +1700,7 @@ var amb_player: AudioStreamPlayer
 var amb_cd := 6.0
 var news_cd := 25.0
 var prev_tier_s := 0
+var champ_spawned := false
 var serp_head: Texture2D
 var serp_body: Texture2D
 var serp_wing: Texture2D
@@ -2269,6 +2285,12 @@ func _drowned(delta: float) -> void:
 			allies.append({"kind": "fishman", "pos": Vector2(pos.x + randf_range(-40, 40), -4), "hp": 3, "cd": 0.0, "life": 30.0})
 
 func _madden(u: Dictionary) -> void:
+	# a priest's ward turns the whisper away
+	for u2 in units:
+		if u2.kind == "priest" and not u2.get("dead", false) and not u2.get("mad", false) \
+				and absf(u2.pos.x - u.pos.x) < 90.0 and u != u2:
+			_pop(u.pos + Vector2(0, -16), "WARDED", Color(1.8, 1.6, 1.0))
+			return
 	madden_count += 1
 	_sfx("whisper")
 	u.mad = true
@@ -3036,6 +3058,11 @@ func _open_draft() -> void:
 	else:
 		title.text = branch.to_upper() + " DEEPENS — choose"
 		opts = NODE_DEFS[branch].filter(func(n): return not nodes.has(n.id))
+		if opts.is_empty():
+			# the line is complete — one crown remains
+			title.text = "THE LINE IS COMPLETE"
+			opts = [{"id": "apotheosis", "name": "APOTHEOSIS — " + branch.to_upper(), "kind": "CAPSTONE",
+				"desc": "become the thing the myths warned about: +15% size, 20% less damage taken, +25% essence"}]
 	_sfx("pick")
 	for i in opts.size():
 		var d: Dictionary = opts[i]
@@ -3051,6 +3078,19 @@ func _open_draft() -> void:
 
 func _pick_draft(id: String) -> void:
 	var picked_name := ""
+	if id == "apotheosis":
+		nodes["apotheosis"] = true
+		growth_mult += 0.15
+		dmg_taken_mult *= 0.8
+		essence_mult *= 1.25
+		bio_stage += 1
+		draft_open = false
+		if draft_layer:
+			draft_layer.queue_free()
+			draft_layer = null
+		impact_frames = 2
+		_pop(pos + Vector2(0, -24), "APOTHEOSIS", Color(2.4, 1.8, 0.8))
+		return
 	if branch == "":
 		branch = id
 		picked_name = BRANCH_DEFS[character].filter(func(d): return d.id == id)[0].name
@@ -3087,6 +3127,16 @@ func _kill_unit(u: Dictionary) -> void:
 			base = 800
 			threat = minf(100.0, threat + 8.0)
 			_pop(u.pos + Vector2(0, -14), "LIVE FEED SEVERED — THE WORLD SAW", Color(2.0, 0.5, 0.4))
+		"flamer": base = 350
+		"priest":
+			base = 500
+			_pop(u.pos + Vector2(0, -14), "THE PRAYER ENDS", Color(1.8, 1.6, 1.0))
+		"champ":
+			base = 5000
+			threat = maxf(0.0, threat - 12.0)
+			impact_frames = 2
+			_pop(u.pos + Vector2(0, -30), u.get("name", "THE CHAMPION") + " HAS FALLEN — THE ARMY REELS", Color(2.2, 1.7, 0.6))
+			_sfx("bell")
 		"soldier": base = 120
 		"carcass": base = 150
 		_: base = 300
@@ -3144,19 +3194,32 @@ func _army(delta: float) -> void:
 		var x: float = pos.x + side * randf_range(360, 560)
 		if x > 30 and x < world_w - 30:
 			var roll := randf()
-			if tier >= 5 and roll < 0.15 and not units.any(func(u): return u.kind == "jet"):
+			if tier >= 5 and not champ_spawned and not prologue:
+				# the world sends its best — a named champion, once per battle
+				champ_spawned = true
+				var cname: String = ["COL. VASHKO", "MARSHAL HELVIG", "CMDR. OKONKWO", "GEN. THARN"][randi() % 4]
+				units.append({"kind": "champ", "pos": Vector2(x, 0), "cd": 2.0, "hp": 14, "name": cname})
+				_pop(Vector2(x, -40), cname + " TAKES THE FIELD", Color(2.2, 1.6, 0.5))
+				_sfx("horn")
+			elif tier >= 5 and roll < 0.15 and not units.any(func(u): return u.kind == "jet"):
 				units.append({"kind": "jet", "pos": Vector2(pos.x - side * 700.0, -250), "cd": 0.0,
 					"hp": 2, "vx": side * 300.0, "bombs": 3})
 			elif tier >= 4 and roll < 0.45:
 				units.append({"kind": "heli", "pos": Vector2(x, randf_range(-220, -150)), "cd": randf_range(0.5, 1.2), "hp": 2})
 			elif tier >= 3 and roll < 0.62:
-				if randf() < 0.3:
+				if randf() < 0.22:
 					units.append({"kind": "arty", "pos": Vector2(x, 0), "cd": randf_range(1.5, 2.5), "hp": 2})
+				elif randf() < 0.2:
+					# a priest walks with the column, warding minds and blessing guns
+					units.append({"kind": "priest", "pos": Vector2(x, 0), "cd": 1.0, "hp": 2})
 				else:
 					units.append({"kind": "tank", "pos": Vector2(x, 0), "cd": randf_range(0.7, 1.5), "hp": 3})
 			elif tier >= 2 and roll < 0.5:
-				for i in 3:
-					units.append({"kind": "soldier", "pos": Vector2(x + i * 8.0, 0), "cd": randf_range(0.4, 1.4), "hp": 1})
+				if randf() < 0.25:
+					units.append({"kind": "flamer", "pos": Vector2(x, 0), "cd": randf_range(0.5, 1.0), "hp": 2})
+				else:
+					for i in 3:
+						units.append({"kind": "soldier", "pos": Vector2(x + i * 8.0, 0), "cd": randf_range(0.4, 1.4), "hp": 1})
 			else:
 				units.append({"kind": "police", "pos": Vector2(x, 0), "cd": randf_range(0.6, 1.2), "hp": 1})
 	for u in units:
@@ -3229,6 +3292,28 @@ func _army(delta: float) -> void:
 				u.pos.y = -170.0 + sin(t * 1.4) * 10.0
 				if absf(dx) < 280.0:
 					_feed("fear", 0.5 * delta)
+			"flamer":
+				# closes in and hoses the low air with fire
+				if absf(dx) > 55.0:
+					u.pos.x += signf(dx) * 40.0 * delta * slow
+				elif pos.y > -85.0:
+					if randf() < 12.0 * delta:
+						parts.append({"pos": u.pos + Vector2(signf(dx) * 6.0, -7.0),
+							"vel": Vector2(signf(dx) * randf_range(60, 110), randf_range(-50, -15)),
+							"life": randf_range(0.3, 0.6), "col": Color(2.2, 1.1, 0.3), "fire": true})
+					if pos.distance_to(u.pos + Vector2(0, -8)) < 80.0:
+						hp -= 4.5 * delta * dmg_taken_mult
+						if randf() < 2.0 * delta:
+							hit_flash = 0.6
+			"priest":
+				# keeps to the column and prays — nearby guns bless-fire faster
+				u.pos.x += signf(dx) * 18.0 * delta * slow
+				for u2 in units:
+					if u2 != u and not u2.get("mad", false) and absf(u2.pos.x - u.pos.x) < 90.0:
+						u2.cd -= delta * 0.4
+			"champ":
+				# the champion advances like a tank and answers in salvos
+				u.pos.x += signf(dx) * 22.0 * delta * slow
 			"jet":
 				u.pos.x += u.vx * delta
 				if absf(dx) < 90.0 and u.bombs > 0:
@@ -3240,7 +3325,7 @@ func _army(delta: float) -> void:
 		u.cd -= delta
 		u.mf = maxf(0.0, u.get("mf", 0.0) - delta)
 		var fire_range: float = 700.0 if u.kind == "arty" else 420.0
-		if u.cd <= 0.0 and absf(dx) < fire_range and not u.kind in ["jet", "news"]:
+		if u.cd <= 0.0 and absf(dx) < fire_range and not u.kind in ["jet", "news", "flamer", "priest"]:
 			u.cd = maxf(0.4, (randf_range(1.1, 2.0) - tier * 0.12) / defense)
 			u.mf = 0.07
 			var origin: Vector2 = u.pos + Vector2(0, -18 if u.kind != "heli" else 4)
@@ -3255,7 +3340,13 @@ func _army(delta: float) -> void:
 					tgt = a.pos + Vector2(0, -6)
 					tvel = Vector2.ZERO
 			var lead: Vector2 = tgt + tvel * 0.35
-			if u.kind == "arty":
+			if u.kind == "champ":
+				# a fan of three heavy shells
+				for si in 3:
+					var cdir := (lead - origin).normalized().rotated((si - 1) * 0.18)
+					shells.append({"pos": origin, "vel": cdir * 175.0, "life": 4.0, "heavy": true})
+				u.cd = randf_range(2.6, 3.6) / defense
+			elif u.kind == "arty":
 				# ballistic lob
 				var fl := (lead - origin)
 				shells.append({"pos": origin, "vel": Vector2(fl.x * 0.55, -190.0), "life": 6.0,
@@ -3464,6 +3555,9 @@ func _end(m: String, s: String) -> void:
 	over = true
 	hud.msg.text = m
 	hud.sub.text = s
+	people_killed = people_total - people.size()
+	hud.stats.text = "razed %d   ·   devoured %d souls   ·   broke %d war machines   ·   %d:%02d" \
+		% [buildings_razed, people_killed, unit_kills, int(run_time) / 60, int(run_time) % 60]
 
 func _input(e: InputEvent) -> void:
 	if over and e.is_action_pressed("restart"):
@@ -3536,6 +3630,9 @@ func _build_hud() -> void:
 	hud.sub = _label(layer, Vector2(0, 180), 10, Color("#e8f0ff"))
 	hud.sub.size = Vector2(640, 20)
 	hud.sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud.stats = _label(layer, Vector2(0, 204), 9, Color("#b8a8d8"))
+	hud.stats.size = Vector2(640, 16)
+	hud.stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var help := _label(layer, Vector2(10, 344), 8, Color(0.85, 0.9, 1, 0.45))
 	match character:
 		"keraunos":
@@ -4152,6 +4249,32 @@ func _draw_actors() -> void:
 				var to_swarm := (pos - p).normalized()
 				draw_colored_polygon(PackedVector2Array([p, p + to_swarm * 90.0 + to_swarm.orthogonal() * 22.0,
 					p + to_swarm * 90.0 - to_swarm.orthogonal() * 22.0]), Color(1.0, 1.0, 0.85, 0.05))
+			"flamer":
+				draw_rect(Rect2(p.x - 2, p.y - 7, 4, 5), Color("#5a4430"))
+				draw_rect(Rect2(p.x - 2, p.y - 9, 4, 2), Color("#403020"))
+				draw_rect(Rect2(p.x - 4, p.y - 6, 2, 4), Color("#803020"))   # tank on the back
+				var pil: float = 0.5 + 0.5 * sin(t * 12.0 + p.x)
+				draw_circle(p + Vector2(signf(pos.x - p.x) * 5.0, -6), 1.2, Color(2.2, 1.2, 0.3, pil))
+			"priest":
+				draw_rect(Rect2(p.x - 2, p.y - 8, 4, 6), Color("#d8d0c0"))
+				draw_rect(Rect2(p.x - 2, p.y - 10, 4, 2), Color("#b0a890"))
+				draw_line(Vector2(p.x, p.y - 13), Vector2(p.x, p.y - 10), Color(1.9, 1.7, 1.0), 1)
+				draw_line(Vector2(p.x - 1.5, p.y - 12), Vector2(p.x + 1.5, p.y - 12), Color(1.9, 1.7, 1.0), 1)
+				draw_arc(p + Vector2(0, -8), 90.0, 0, TAU, 40, Color(1.8, 1.6, 0.9, 0.05 + 0.02 * sin(t * 3.0)), 1.0)
+			"champ":
+				# the champion's command tank — bannered, armored, named
+				draw_rect(Rect2(p.x - 13, p.y - 9, 26, 7), Color("#4a3c2c"))
+				draw_rect(Rect2(p.x - 13, p.y - 9, 26, 2), Color("#5c4c38"))
+				draw_rect(Rect2(p.x - 7, p.y - 14, 14, 6), Color("#4a3c2c"))
+				draw_line(Vector2(p.x, p.y - 12), Vector2(p.x + signf(pos.x - p.x) * 15, p.y - 16), Color("#4a3c2c"), 2.5)
+				draw_rect(Rect2(p.x - 14, p.y - 3, 28, 3), Color("#1c1812"))
+				draw_line(Vector2(p.x - 10, p.y - 14), Vector2(p.x - 10, p.y - 22), Color("#2c2418"), 1)
+				draw_rect(Rect2(p.x - 10, p.y - 22, 6, 4), Color(1.9, 1.5, 0.4))
+				draw_string(ui_font, p + Vector2(0, -26), u.get("name", "CHAMPION"),
+					HORIZONTAL_ALIGNMENT_CENTER, -1, 7, Color(2.0, 1.7, 0.8))
+				# health bar
+				draw_rect(Rect2(p.x - 12, p.y - 25, 24, 2), Color(0.1, 0.08, 0.1))
+				draw_rect(Rect2(p.x - 12, p.y - 25, 24.0 * u.hp / 14.0, 2), Color(1.9, 0.5, 0.4))
 			"news":
 				draw_rect(Rect2(p.x - 8, p.y - 3, 16, 6), Color("#c8ccd4"))
 				draw_rect(Rect2(p.x + (8 if pos.x < p.x else -14), p.y - 1, 6, 2), Color("#c8ccd4"))
