@@ -32,6 +32,7 @@ var ui_font: FontFile
 var picking_relic := false
 
 func _ready() -> void:
+	Global.music("map")
 	ui_font = load("res://art/Silkscreen-Regular.ttf")
 	# offered a relic after each razing (skip the very first arrival)
 	picking_relic = Global.node_params.get("offer_relic", false)

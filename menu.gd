@@ -42,6 +42,7 @@ var screen := "root"   # root | char_crusade | char_skirmish | city_skirmish | p
 var picked_char := ""
 
 func _ready() -> void:
+	Global.music("menu")
 	_build()
 
 func _mklabel(txt: String, y: float, sz: int, col: Color) -> Label:

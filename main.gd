@@ -206,6 +206,7 @@ func _ready() -> void:
 		_bake_rider()
 	_setup_env()
 	_setup_sfx()
+	Global.music("battle", 0)
 	_slice_facades()
 	_build_city()
 	for i in 60:
@@ -1355,6 +1356,7 @@ func _process(delta: float) -> void:
 			doom_cd = 45.0
 			doom_t = 3.0
 			doom_p = pos
+			Global.music("doom")
 			_pop(pos + Vector2(0, -40), "!! LAST RESORT INBOUND — MOVE !!", Color(2.4, 0.4, 0.3))
 			_sfx("thunder")
 	if not over:
@@ -1404,6 +1406,7 @@ func _process(delta: float) -> void:
 			if tier > prev_tier_s:
 				_sfx("siren" if tier >= 3 else "bell")
 			prev_tier_s = tier
+			Global.music("battle", tier)
 		_check_end()
 	for b in buildings:
 		if b.holes.size() > 40:

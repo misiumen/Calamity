@@ -31,6 +31,88 @@ func _ready() -> void:
 		node_params = {"kind": OS.get_environment("CAL_KIND"), "world_w": 2200.0, "tier_cap": 3,
 			"objective": OS.get_environment("CAL_OBJ") if OS.get_environment("CAL_OBJ") != "" else "raze"}
 
+# ============ music: threat-layered synth stems, alive across scenes ============
+var mus: Array = []                                   # base pad / percussion / dread / panic
+var mus_target := [-60.0, -60.0, -60.0, -60.0]
+
+func _process(delta: float) -> void:
+	for i in mus.size():
+		mus[i].volume_db = lerpf(mus[i].volume_db, mus_target[i], 1.5 * delta)
+
+func music(mode_s: String, tier: int = 0) -> void:
+	_mus_init()
+	match mode_s:
+		"menu":
+			mus[0].pitch_scale = 0.8
+			mus_target = [-16.0, -60.0, -60.0, -60.0]
+		"map":
+			mus[0].pitch_scale = 0.9
+			mus_target = [-14.0, -26.0, -60.0, -60.0]
+		"battle":
+			mus[0].pitch_scale = 1.0
+			mus_target = [-13.0, (-15.0 if tier >= 2 else -60.0), (-15.0 if tier >= 4 else -60.0), -60.0]
+		"doom":
+			mus_target = [-13.0, -60.0, -13.0, -10.0]
+
+func _mus_init() -> void:
+	if not mus.is_empty():
+		return
+	for i in 4:
+		var p := AudioStreamPlayer.new()
+		p.volume_db = -60.0
+		add_child(p)
+		mus.append(p)
+	mus[0].stream = _mloop_pad([55.0, 82.5, 110.0], 6.0, 0.0)      # dark root-fifth-octave pad
+	mus[1].stream = _mloop_perc(2.0, 0.5)                          # war drums
+	mus[2].stream = _mloop_pad([220.0, 233.0, 311.0], 4.0, 0.12)   # dissonant dread shimmer
+	mus[3].stream = _mloop_perc(2.0, 0.25)                         # double-time panic
+	for p in mus:
+		p.play()
+
+func _mloop_pad(freqs: Array, dur: float, noise_amt: float) -> AudioStreamWAV:
+	# freqs*dur must be integers so the loop seam is silent
+	var rate := 22050
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		var ts: float = float(i) / rate
+		var s := 0.0
+		for fi in freqs.size():
+			var lfo: float = 0.55 + 0.45 * sin(TAU * ts / dur * float(fi + 1))
+			s += sin(TAU * float(freqs[fi]) * ts) * lfo / freqs.size()
+		if noise_amt > 0.0:
+			s += (randf() * 2.0 - 1.0) * noise_amt
+		var v := int(clampf(s * 0.8, -1.0, 1.0) * 26000.0)
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	return _mwav(data, rate, n)
+
+func _mloop_perc(dur: float, beat: float) -> AudioStreamWAV:
+	var rate := 22050
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		var ts: float = float(i) / rate
+		var kp: float = fmod(ts, beat * 2.0)
+		var s: float = sin(TAU * 58.0 * kp) * exp(-kp * 9.0) * 0.9
+		var tp: float = fmod(ts + beat * 0.5, beat)
+		s += (randf() * 2.0 - 1.0) * exp(-tp * 60.0) * 0.35
+		var v := int(clampf(s, -1.0, 1.0) * 26000.0)
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	return _mwav(data, rate, n)
+
+func _mwav(data: PackedByteArray, rate: int, n: int) -> AudioStreamWAV:
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.data = data
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_end = n
+	return wav
+
 func reset_crusade(chr: String) -> void:
 	character = chr
 	mode = "crusade"
