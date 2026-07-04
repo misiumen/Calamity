@@ -131,6 +131,8 @@ var ambient: Array = []          # drifting embers/dust
 var frags: Array = []            # tumbling building fragments
 var flash_t := 0.0               # white screen flash on big events
 var impact_frames := 0           # hard white frames on the biggest hits
+var milestone_i := 0             # devour milestones fired
+var over_t := 0.0                # time since the end screen fell
 var fire_lights: Array = []      # pooled PointLight2D for blazes
 var flash_light: PointLight2D
 var post_mat: ShaderMaterial
@@ -257,7 +259,10 @@ func _ready() -> void:
 	add_child(swarm_light)
 	_build_hud()
 	if prologue:
-		_caption(prol_beats[0].cap, false)
+		# cold open: the origin lines fall one by one before the first beat
+		var op: Array = PROLOGUE_OPEN.get(character, [])
+		caption_queue = op.slice(1) + [prol_beats[0].cap]
+		_caption(op[0] if not op.is_empty() else prol_beats[0].cap, false)
 	elif OS.get_environment("CAL_SHOT") == "" or OS.get_environment("CAL_INTRO") != "":
 		_start_intro()
 
@@ -598,6 +603,18 @@ const HERALD_DEFS := {
 		"spd": 120.0, "slam": true, "graft": "oldcrown", "gname": "OLD CROWN", "gdesc": "the oldest hunger: bigger cap, richer feeding"},
 }
 
+const PROLOGUE_OPEN := {
+	"swarm": ["The drought year, the villages prayed the locusts would pass them by.",
+		"Something in the cloud heard. Something in the cloud answered."],
+	"keraunos": ["The mountain shrines went cold. No one fed the storm its honors.",
+		"High in the anvil clouds, one throat woke. Then another. Then nine."],
+	"tzitzimitl": ["They dug the temple out of the jungle and lit it with floodlights.",
+		"The seal had one purpose. The archaeologists called it decoration."],
+	"drowned": ["The bay gave them fish for nine generations. They gave it poison.",
+		"The lighthouse keeper heard singing under the waterline. He opened the sea gate."],
+	"rider": ["When the plague came, the village burned its sick to save itself.",
+		"The ash was still warm when the hoofbeats started."],
+}
 const PROLOGUE_DEFS := {
 	"swarm": {"city": "ashport", "beats": [
 		{"goal": "people", "n": 8, "cap": "The drought year, the villages prayed the locusts would pass.\nSomething in the cloud heard. EAT."},
@@ -686,6 +703,12 @@ func _prologue_check() -> void:
 		else:
 			_caption("IT HAS A NAME NOW.\nAnd the world has a problem.", true)
 
+var caption_queue: Array = []
+
+func _caption_next() -> void:
+	if not caption_queue.is_empty():
+		_caption(caption_queue.pop_front(), false)
+
 func _caption(text: String, final: bool) -> void:
 	caption_layer = CanvasLayer.new()
 	caption_layer.layer = 96
@@ -711,7 +734,9 @@ func _caption(text: String, final: bool) -> void:
 		if final:
 			Global.node_i = 0
 			Global.save_crusade()
-			Global.launch_act1())
+			Global.launch_act1()
+		elif not caption_queue.is_empty():
+			call_deferred("_caption_next"))
 	caption_layer.add_child(btn)
 
 func _apply_branch_stats() -> void:
@@ -1487,7 +1512,7 @@ func _process(delta: float) -> void:
 				if pe.pos.x >= lo2 and pe.pos.x <= hi2:
 					pe.dead = true
 					score_f += 20.0 * combo * TIER_MULT[tier]
-					_feed("flesh", 1.0)
+					_gout(Vector2(pe.pos.x, -6), "flesh", 1.4, 1)
 					_mist(Vector2(pe.pos.x, -5))
 			for u in units:
 				if not u.get("dead", false) and u.kind != "jet" and u.pos.y > -40.0 \
@@ -1592,6 +1617,51 @@ func _process(delta: float) -> void:
 				parts.append({"pos": Vector2(cp2.x, -50), "vel": Vector2.ZERO, "life": 0.3,
 					"col": Color(2.4, 2.2, 1.4), "flash": true, "size": 26.0})
 				_pop(cp2 + Vector2(0, -40), "HALO OF RUIN", Color(2.2, 2.0, 1.1))
+	# essence orbs fly home
+	for o in eorbs:
+		o.t += delta
+		if o.t < 0.25:
+			o.vel *= pow(0.12, delta)
+		else:
+			o.vel = o.vel.lerp((pos - o.pos).normalized() * (240.0 + o.t * 280.0), 8.0 * delta)
+		o.pos += o.vel * delta
+		if o.pos.distance_to(pos) < maxf(14.0, radius * 0.8):
+			_feed(o.kind, o.val)
+			o.dead = true
+			if randf() < 0.5:
+				var oc2: Color = EORB_COLS.get(o.kind, Color(1.6, 1.2, 0.9))
+				parts.append({"pos": o.pos, "vel": (o.pos - pos).normalized() * -30.0,
+					"life": 0.3, "col": oc2, "size": 1.5})
+		elif o.t > 5.0:
+			_feed(o.kind, o.val)
+			o.dead = true
+	eorbs = eorbs.filter(func(o2): return not o2.get("dead", false))
+	# devour milestones — the city audibly loses
+	if not prologue and not over and total_mass > 0.0:
+		var ms := [0.25, 0.5, 0.75, 0.999]
+		if milestone_i < 4 and _eaten_frac() >= ms[milestone_i]:
+			milestone_i += 1
+			var plc: String = (node_place if node_place != "" else str(city_def.get("name", "THE CITY"))).to_upper()
+			var msn: String = ["%s BLEEDS — A QUARTER DEVOURED", "%s BREAKS — HALF DEVOURED",
+				"%s KNEELS — THREE QUARTERS GONE", "%s IS NO MORE"][milestone_i - 1] % plc
+			_pop(Vector2(cam.position.x, -170), msn, Color(2.0, 1.6, 0.6))
+			score_f += 4000.0 * milestone_i * combo
+			flash_t = maxf(flash_t, 0.25)
+			_sfx("siren" if milestone_i < 3 else "bell")
+			for pp in people:
+				pp.panic = true
+	# smoldering ruins are feeding grounds
+	if not over:
+		for b in buildings:
+			if b.dead and t < b.get("smolder", 0.0) and absf(b.x + b.w * 0.5 - pos.x) < 70.0 and pos.y > -90.0:
+				_feed("mass", 1.1 * delta)
+				if randf() < 2.0 * delta:
+					parts.append({"pos": Vector2(b.x + randf() * b.w, -6.0),
+						"vel": (pos - Vector2(b.x + b.w * 0.5, -10)).normalized() * 40.0,
+						"life": 0.5, "col": Color(1.2, 1.0, 1.4, 0.8), "size": 1.2})
+				break
+	# combo heat — the screen itself warms up
+	post_mat.set_shader_parameter("heat", clampf((combo - 3.0) / 6.0, 0.0, 1.0) * 0.8)
 	# screen ripple rolls outward
 	if shock_p < 1.0:
 		shock_p = minf(1.0, shock_p + delta * 1.8)
@@ -2379,6 +2449,21 @@ func _drowned(delta: float) -> void:
 			allies.append({"kind": "fishman", "pos": Vector2(pos.x + randf_range(-40, 40), -4), "hp": 3, "cd": 0.0, "life": 30.0})
 
 var spawn_q: Array = []
+var eorbs: Array = []            # essence orbs in flight toward the god
+const EORB_COLS := {"flesh": Color(1.9, 0.5, 0.6), "charge": Color(0.6, 1.6, 2.2),
+	"light": Color(2.0, 1.6, 0.5), "fear": Color(1.4, 0.6, 1.8),
+	"death": Color(0.8, 1.6, 0.9), "mass": Color(1.2, 1.0, 1.4)}
+
+func _gout(p: Vector2, kind: String, amt: float, n: int = 3) -> void:
+	# the meal made visible — orbs burst out, then fly home to the god
+	if eorbs.size() > 110:
+		_feed(kind, amt)
+		return
+	for i in n:
+		var a := randf() * TAU
+		eorbs.append({"pos": p + Vector2(cos(a), sin(a)) * randf_range(2.0, 8.0),
+			"vel": Vector2(cos(a), sin(a)) * randf_range(50.0, 120.0) + Vector2(0, -50),
+			"kind": kind, "val": amt / n, "t": 0.0})
 
 func _spawn_herald(htype: String) -> void:
 	herald_alive = true
@@ -2556,7 +2641,7 @@ func _rider(delta: float) -> void:
 			if dp.length() < reach and absf(angle_difference(dp.angle(), scythe_ang)) < 0.95:
 				pe.dead = true
 				score_f += 20.0 * combo * TIER_MULT[tier]
-				_feed("death", 2.0)
+				_gout(Vector2(pe.pos.x, -6), "death", 2.0, 1)
 				_mist(Vector2(pe.pos.x, -5))
 				_rise(Vector2(pe.pos.x, -4), false)
 		people = people.filter(func(pe2): return not pe2.get("dead", false))
@@ -2939,6 +3024,7 @@ func _collapse(b: Dictionary) -> void:
 			"vel": Vector2(randf_range(-45, 45), randf_range(-60, -30)),
 			"life": randf_range(1.3, 2.2), "col": Color(0.72, 0.7, 0.78), "bird": true})
 	_shockripple(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.4))
+	_gout(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.4), "mass", minf(26.0, b.maxhp * 0.05), 5)
 	if b.cit:
 		impact_frames = 3
 	# the crowd beneath does not escape
@@ -2946,7 +3032,7 @@ func _collapse(b: Dictionary) -> void:
 		if pe.pos.x > b.x - 12.0 and pe.pos.x < b.x + b.w + 12.0:
 			pe.dead = true
 			score_f += 20.0 * combo * TIER_MULT[tier]
-			_feed("flesh", 1.0)
+			_gout(Vector2(pe.pos.x, -6), "flesh", 1.4, 1)
 			_mist(Vector2(pe.pos.x, -5))
 	_hitstop(300 if b.cit else 110, 0.15 if b.cit else 0.3)
 	flash_t = maxf(flash_t, 0.55 if b.cit else 0.3)
@@ -3562,7 +3648,7 @@ func _kill_unit(u: Dictionary) -> void:
 	unit_kills += 1
 	var gain := int(base * combo * TIER_MULT[tier])
 	score_f += gain
-	_feed("death", 20.0 if u.kind == "tank" else 12.0)
+	_gout(u.pos + Vector2(0, -8), "death", 20.0 if u.kind == "tank" else 12.0, 4)
 	combo = minf(9.5, combo + (0.6 if nodes.has("cloud") else 0.3))
 	combo_idle = 0.0
 	hp = minf(100.0, hp + ((6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0)) * heal_mult)
@@ -4017,18 +4103,19 @@ func _crusade_button(label: String, win: bool) -> void:
 	btn.pressed.connect(func():
 		Engine.time_scale = 1.0
 		if not win:
-			get_tree().reload_current_scene()
+			Global.goto("res://main.tscn")
 		elif Global.act == 1:
 			Global.launch_act1()
 		elif Global.node_params.get("capital", false):
-			get_tree().change_scene_to_file("res://menu.tscn")
+			Global.goto("res://menu.tscn")
 		else:
 			Global.node_params = {"offer_relic": true}
-			get_tree().change_scene_to_file("res://map.tscn"))
+			Global.goto("res://map.tscn"))
 	layer.add_child(btn)
 
 func _end(m: String, s: String) -> void:
 	over = true
+	over_t = 0.0
 	hud.msg.text = m
 	hud.sub.text = s
 	people_killed = people_total - people.size()
@@ -4042,9 +4129,9 @@ func _input(e: InputEvent) -> void:
 			_pick_draft(draft_opts[ki].id)
 			return
 	if over and e.is_action_pressed("restart"):
-		get_tree().reload_current_scene()
+		Global.goto("res://main.tscn")
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
-		get_tree().change_scene_to_file("res://menu.tscn")
+		Global.goto("res://menu.tscn")
 
 func _boom(p: Vector2, n: int, col: Color, sp: float) -> void:
 	for i in n:
@@ -4183,6 +4270,9 @@ func _hud_update() -> void:
 	hud.lb_top.size.y = 44.0 * letterbox
 	hud.lb_bot.position.y = 360.0 - 44.0 * letterbox
 	hud.lb_bot.size.y = 44.0 * letterbox
+	if over:
+		hud.stats.visible = over_t > 0.6
+		hud.sub.visible = over_t > 0.25
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
 	if Global.mode == "crusade" and not prologue:
@@ -4287,6 +4377,10 @@ func _draw() -> void:
 		draw_circle(o.pos, rr + 3.0, Color(0.5, 1.2, 2.0, 0.18))
 		draw_circle(o.pos, rr, Color(1.2, 1.9, 2.5))
 		draw_circle(o.pos, rr * 0.5, Color(2.2, 2.4, 2.8))
+	for o in eorbs:
+		var oc: Color = EORB_COLS.get(o.kind, Color(1.6, 1.2, 0.9))
+		draw_circle(o.pos, 3.4, Color(oc.r, oc.g, oc.b, 0.18))
+		draw_circle(o.pos, 1.6, oc)
 	for p in pops:
 		var a2: float = clampf(p.life, 0.0, 1.0)
 		draw_string(ui_font, p.pos, p.txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,

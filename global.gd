@@ -34,7 +34,25 @@ var node_params := {}
 
 const SAVE_PATH := "user://crusade.save"
 
+# ============ scene fader: every transition breathes through black ============
+var fader: ColorRect
+var fade_a := 0.0
+var fade_target := 0.0
+var fade_path := ""
+
+func goto(path: String) -> void:
+	fade_path = path
+	fade_target = 1.0
+
 func _ready() -> void:
+	var fl := CanvasLayer.new()
+	fl.layer = 100
+	add_child(fl)
+	fader = ColorRect.new()
+	fader.size = Vector2(640, 360)
+	fader.color = Color(0, 0, 0, 0)
+	fader.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fl.add_child(fader)
 	if OS.get_environment("CAL_CHAR") != "":
 		character = OS.get_environment("CAL_CHAR")
 	if OS.get_environment("CAL_CITY") != "":
@@ -52,6 +70,15 @@ var mus_target := [-60.0, -60.0, -60.0, -60.0]
 func _process(delta: float) -> void:
 	for i in mus.size():
 		mus[i].volume_db = lerpf(mus[i].volume_db, mus_target[i], 1.5 * delta)
+	# fade through black on scene changes
+	fade_a = move_toward(fade_a, fade_target, 4.0 * delta)
+	if fader != null:
+		fader.color.a = fade_a
+	if fade_a >= 1.0 and fade_path != "":
+		var p := fade_path
+		fade_path = ""
+		fade_target = 0.0
+		get_tree().change_scene_to_file(p)
 
 func music(mode_s: String, tier: int = 0) -> void:
 	_mus_init()
@@ -162,7 +189,7 @@ func launch_act1() -> void:
 	# act 1 lives on its own Rise map now
 	mode = "crusade"
 	act = 1
-	get_tree().change_scene_to_file("res://map.tscn")
+	goto("res://map.tscn")
 
 func save_crusade() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)

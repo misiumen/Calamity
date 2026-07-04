@@ -101,7 +101,7 @@ func _build() -> void:
 						if Global.act == 1:
 							Global.launch_act1()
 						else:
-							get_tree().change_scene_to_file("res://map.tscn"))
+							Global.goto("res://map.tscn"))
 			_mkbtn("SKIRMISH", 242, func():
 				screen = "char_skirmish"
 				_build())
@@ -141,16 +141,15 @@ func _build() -> void:
 					Global.character = picked_char
 					Global.city = picked_city
 					Global.mutator = mu[0]
-					get_tree().change_scene_to_file("res://main.tscn"))
+					Global.goto("res://main.tscn"))
 				_mklabel(mu[2], 134 + i * 44, 8, Color("#8890b0"))
 		"prologue":
-			var lines: Array = PROLOGUE[picked_char]
-			for i in lines.size():
-				_mklabel(lines[i], 120 + i * 34, 10, Color(0.85, 0.8, 0.85))
-			_mkbtn("LIVE IT", 260, func():
+			_mklabel("every calamity has an origin.", 130, 10, Color(0.85, 0.8, 0.85))
+			_mklabel("live it — or skip straight to the war.", 152, 8, Color("#8890b0"))
+			_mkbtn("LIVE THE ORIGIN", 220, func():
 				Global.reset_crusade(picked_char)
 				Global.node_params = {"kind": "prologue"}
-				get_tree().change_scene_to_file("res://main.tscn"), Color(1.7, 0.5, 0.5))
+				Global.goto("res://main.tscn"), Color(1.7, 0.5, 0.5))
 			_mkbtn("SKIP TO ACT I", 296, func():
 				Global.reset_crusade(picked_char)
 				Global.launch_act1())

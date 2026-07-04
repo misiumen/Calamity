@@ -6,6 +6,7 @@ uniform float vig_amt : hint_range(0.0, 1.0) = 0.42;
 uniform float ca_amt : hint_range(0.0, 4.0) = 1.4;
 uniform vec2 shock_c = vec2(0.5, 0.5);
 uniform float shock_p = 1.0; // ripple progress, >=1 idle
+uniform float heat = 0.0;    // combo heat — warms the whole frame
 
 float rand(vec2 co) {
 	return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
@@ -35,7 +36,9 @@ void fragment() {
 	vec3 col = vec3(r, g, b);
 	// film grain
 	col += (rand(uv * TIME) - 0.5) * grain_amt;
+	// combo heat: warm grade + faint pulse at the edges
+	col = mix(col, col * vec3(1.10, 0.97, 0.88) + vec3(0.035, 0.004, 0.0), heat);
 	// vignette
-	col *= 1.0 - smoothstep(0.35, 0.85, d) * vig_amt;
+	col *= 1.0 - smoothstep(0.35, 0.85, d) * (vig_amt + heat * 0.12);
 	COLOR = vec4(col, 1.0);
 }

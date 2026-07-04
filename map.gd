@@ -76,6 +76,7 @@ const EVENTS := [
 var ui_font: FontFile
 var picking_relic := false
 var in_event := false
+var march = null                 # marching animation -> interstitial -> launch
 var ev_extra := {}               # event outcome folded into the next launch
 
 func _ready() -> void:
@@ -119,10 +120,10 @@ func _reachable(id: int) -> bool:
 	return false
 
 func _unhandled_input(e: InputEvent) -> void:
-	if picking_relic or in_event:
+	if picking_relic or in_event or march != null:
 		return
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
-		get_tree().change_scene_to_file("res://menu.tscn")
+		Global.goto("res://menu.tscn")
 	if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 		var mp := get_global_mouse_position()
 		for n in ns:
@@ -139,7 +140,7 @@ func _unhandled_input(e: InputEvent) -> void:
 				if randf() < 0.4:
 					_event_overlay(n)
 				else:
-					_launch(n)
+					_begin_march(n)
 				return
 
 func _event_overlay(n: Dictionary) -> void:
@@ -182,7 +183,7 @@ func _event_overlay(n: Dictionary) -> void:
 			_apply_ev(opt[1])
 			in_event = false
 			layer.queue_free()
-			_launch(n))
+			_begin_march(n))
 		layer.add_child(btn)
 
 func _apply_ev(fx: Dictionary) -> void:
@@ -256,7 +257,7 @@ func _launch(n: Dictionary) -> void:
 			params.tier_cap = 5
 	Global.node_params = params
 	Global.save_crusade()
-	get_tree().change_scene_to_file("res://main.tscn")
+	Global.goto("res://main.tscn")
 
 func _relic_overlay() -> void:
 	var layer := CanvasLayer.new()
@@ -300,7 +301,16 @@ func _relic_overlay() -> void:
 		d.add_theme_color_override("font_color", Color("#9ab0d0"))
 		layer.add_child(d)
 
-func _process(_delta: float) -> void:
+func _begin_march(n: Dictionary) -> void:
+	march = {"n": n, "t": 0.0, "from": ns[Global.map_pos].pos}
+
+func _process(delta: float) -> void:
+	if march != null:
+		march.t += delta
+		if march.t > 2.6:
+			var n: Dictionary = march.n
+			march = null
+			_launch(n)
 	queue_redraw()
 
 func _draw() -> void:
@@ -383,3 +393,20 @@ func _draw() -> void:
 				draw_string(f, n.pos + Vector2(-70, r + 20), FATE_NAMES.get(fate2, ""),
 					HORIZONTAL_ALIGNMENT_CENTER, 140, 6, Color(1.2, 0.7, 1.5, 0.85))
 	draw_string(f, Vector2(0, 334), "choose where the ruin goes next", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color(0.7, 0.65, 0.7, 0.6))
+	# the march: your ruin travels the road, then the night card falls
+	if march != null:
+		var f2: float = clampf(march.t / 1.1, 0.0, 1.0)
+		var mpos: Vector2 = march.from.lerp(march.n.pos, f2)
+		draw_line(march.from, mpos, Color(1.6, 0.5, 0.3, 0.9), 2.5)
+		draw_circle(mpos, 5.0, Color(1.9, 0.6, 0.4))
+		draw_circle(mpos, 8.0 + sin(Time.get_ticks_msec() * 0.01) * 2.0, Color(1.9, 0.6, 0.4, 0.25))
+		if march.t > 1.3:
+			var ia: float = clampf((march.t - 1.3) / 0.4, 0.0, 1.0)
+			draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.0, 0.05, 0.9 * ia))
+			draw_string(f, Vector2(0, 160), "NIGHT %d" % (Global.razed.size() + 1),
+				HORIZONTAL_ALIGNMENT_CENTER, 640, 16, Color(1.9, 0.5, 0.55, ia))
+			draw_string(f, Vector2(0, 184), "THE ROAD TO " + str(march.n.name),
+				HORIZONTAL_ALIGNMENT_CENTER, 640, 10, Color(0.9, 0.86, 0.95, ia))
+			var flv: String = Global.headline if Global.headline != "" else "The roads empty ahead of you."
+			draw_string(f, Vector2(0, 206), flv.to_lower(), HORIZONTAL_ALIGNMENT_CENTER, 640, 7,
+				Color(0.6, 0.56, 0.7, ia))
