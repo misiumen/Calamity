@@ -99,13 +99,17 @@ func _drive_map(map: Node) -> void:
 func _drive_battle(m: Node, delta: float) -> void:
 	click_cd -= delta
 	retarget -= delta
-	# skip the arrival cinematic
+	# skip the arrival cinematic (and reset grip state — scene changes drop real input)
 	if m.get("intro_t") != null and m.intro_t > 0.0:
+		lmb_down = false
 		_mouse(MOUSE_BUTTON_LEFT, true)
 		_mouse(MOUSE_BUTTON_LEFT, false)
 		return
 	# prologue captions — read on
 	if m.get("caption_layer") != null:
+		if lmb_down:
+			_mouse(MOUSE_BUTTON_LEFT, false)
+			lmb_down = false
 		if Engine.get_frames_drawn() % 20 == 0:
 			var cb := _find_button(m.caption_layer)
 			if cb != null:
@@ -122,15 +126,14 @@ func _drive_battle(m: Node, delta: float) -> void:
 			ended_seen = true
 			_log("end: %s | %s" % [m.hud.msg.text, m.hud.stats.text])
 			report["last_end"] = str(m.hud.msg.text)
-		var eb := _find_button(m)
-		if eb != null:
-			ended_seen = false
-			if lmb_down:
-				_mouse(MOUSE_BUTTON_LEFT, false)
-				lmb_down = false
-			eb.emit_signal("pressed")
-		else:
-			_finish("done")
+			var eb := _find_button(m)
+			if eb != null:
+				if lmb_down:
+					_mouse(MOUSE_BUTTON_LEFT, false)
+					lmb_down = false
+				eb.emit_signal("pressed")
+			else:
+				_finish("done")
 		return
 	ended_seen = false
 	# ---- softlock watchdog: some number must keep moving ----
