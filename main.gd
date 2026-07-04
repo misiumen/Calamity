@@ -142,6 +142,8 @@ var growth_mult := 1.0           # stage scale: prologue whelp / act-1 ramp / re
 # --- crusade node state ---
 var node_kind := "city"          # hamlet | town | city | capital
 var node_fate := ""              # act-2 road fate tag
+var node_militia := false        # act-1 early nodes: farmers, not armies
+var node_place := ""             # named settlement
 var tier_cap := 5
 var objective := "raze"
 var obj_timer := 0.0
@@ -490,6 +492,8 @@ func _apply_campaign() -> void:
 	is_capital = p.get("capital", false)
 	# the road's fate colors the battle
 	node_fate = p.get("fate", "")
+	node_militia = p.get("militia", false)
+	node_place = str(p.get("place", ""))
 	match node_fate:
 		"richfeeding": essence_mult *= 1.5
 		"garrisoned":
@@ -543,7 +547,7 @@ func _apply_campaign() -> void:
 	essence_eaten = Global.c_essence
 	# act 1 starts you SMALL — a whisper of what you'll be
 	if Global.act == 1:
-		growth_mult = [0.7, 0.85, 1.0][mini(2, Global.node_i)]
+		growth_mult = [0.7, 0.8, 0.88, 0.94, 1.0][mini(4, Global.razed.size())]
 	_apply_branch_stats()
 	# relics
 	for rl in Global.relics:
@@ -630,7 +634,7 @@ func _start_intro() -> void:
 	pos = intro_from
 	vel = Vector2.ZERO
 	letterbox = 1.0
-	hud.msg.text = city_def.get("name", Global.city.to_upper())
+	hud.msg.text = node_place if node_place != "" else city_def.get("name", Global.city.to_upper())
 	hud.sub.text = ARRIVE_LINES.get(character, "")
 	cam.position = Vector2(clampf(intro_from.x, 320.0, world_w - 320.0), -105)
 
@@ -1242,14 +1246,14 @@ func _carve(b: Dictionary, world: Vector2, r_px: float) -> void:
 
 # ================= update =================
 func _process(delta: float) -> void:
-	if draft_open:
-		return
 	t += delta
 	if OS.get_environment("CAL_SHOT") != "":
 		_shot_frames += 1
 		if OS.get_environment("CAL_TEST").begins_with("herald:") and _shot_frames == 60:
 			if not herald_alive:
 				_spawn_herald(OS.get_environment("CAL_TEST").get_slice(":", 1))
+		if OS.get_environment("CAL_TEST") == "draft" and _shot_frames == 60 and not draft_open:
+			_open_draft()
 		if OS.get_environment("CAL_TEST") == "topple" and _shot_frames == 85:
 			for b in buildings:
 				if not b.dead and b.h > b.w and absf(b.x - pos.x) < 320.0 \
@@ -1259,6 +1263,8 @@ func _process(delta: float) -> void:
 		if _shot_frames == 130:
 			get_viewport().get_texture().get_image().save_png(OS.get_environment("CAL_SHOT"))
 			get_tree().quit()
+	if draft_open:
+		return
 	# arrival — the calamity walks in before the war starts
 	if intro_t > 0.0:
 		intro_t -= delta
@@ -1733,7 +1739,7 @@ var nodes := {}                  # node id -> true
 var bio := 0.0
 var bio_stage := 0
 var draft_open := false
-var draft_layer: CanvasLayer = null
+var draft_ui: Control = null
 var pods: Array = []             # {b, p(local), t_left, tick}
 var rmb_cd := 0.0
 var threat_mult := 1.0
@@ -3258,41 +3264,76 @@ const NODE_DEFS := {
 	],
 }
 
+const DELTA := {
+	"ironmaw": ["smash damage +60%", "smash arc +40% wider", "smashes shockwave nearby"],
+	"gorehook": ["reel speed x2", "drag damage +100%", "grabs grind through walls"],
+	"spore": ["wounds seed living pods", "each pod gnaws 2/s", "pods stack per building"],
+	"manyheads": ["banked bolts 3 > 4", "strikes fork to 2nd target"],
+	"ball": ["strikes leave a live orb", "orbs zap whatever comes close"],
+	"skyfall": ["RMB = vertical ruin column", "deletes a full slice", "cost 40 storm"],
+	"suneater": ["eclipse 8s > 16s", "army wilts in your dark"],
+	"obsidian": ["lance wounds +50% wider", "+15% dmg per building pierced"],
+	"feather": ["dives molt 3 razor feathers", "feathers cut on contact"],
+	"choir": ["madness leaps on burnout", "spread radius 60px"],
+	"tide": ["your wake floods streets", "flood slows army 50%", "crowds drown in it"],
+	"father": ["the deep sends brutes", "squads x2 size", "brute damage x2"],
+	"legion": ["horde cap 8 > 16"],
+	"blight": ["passage paints plague ground", "standing on it infects"],
+	"crown": ["fallen soldiers rise ARMED", "your dead shoot back"],
+	"seismic": ["NEW: RMB street shockwave", "flips units both ways", "cracks foundations"],
+	"chitin": ["damage taken -35%"],
+	"aftershock": ["every smash echoes", "2nd shockwave at 0.4s"],
+	"sling": ["NEW: RMB hurl grabbed unit", "empty-handed: self grapple"],
+	"flenser": ["thrown bodies dmg x2"],
+	"sinew": ["reach +40%", "hold 2 victims at once"],
+	"burst": ["NEW: RMB detonate all pods", "craters + shockwaves"],
+	"creep": ["dying pods seed a child"],
+	"cloud": ["kills heal +6", "kills combo +0.3"],
+	"fourthhead": ["+1 banked bolt", "recharge faster"],
+	"overcharge": ["strikes truly ignite", "craters +50% wider"],
+	"stormfront": ["TEMPEST: 7 > 9 bolts", "cost -30%"],
+	"twincast": ["2 orbs per strike"],
+	"magnetize": ["orbs seek buildings", "orbs gnaw walls"],
+	"resonance": ["orb pairs arc together", "arcs fry crossers"],
+	"annihilate": ["column ~2x wide"],
+	"thunderclap": ["skyfall stuns ALL 2s"],
+	"conductor": ["skyfall 40 > 25 storm"],
+	"blackdawn": ["blackout +8s"],
+	"gorger": ["kills in the dark heal you"],
+	"voidheart": ["devour cost 80 > 55"],
+	"sonicboom": ["dives end in shockwave"],
+	"serration": ["dive cooldown -45%"],
+	"cleave": ["pierced buildings burn on"],
+	"molt": ["3 > 6 feathers per dive"],
+	"echoes": ["madden cooldown halved"],
+	"hollowing": ["madness lasts +8s"],
+	"leviathan": ["flood drowns soldiers"],
+	"miasma": ["plague ground wider"],
+	"spores": ["plague ground lasts x2"],
+	"endless": ["risen never crumble"],
+	"drill": ["horde moves x2 speed"],
+	"martyrs": ["risen burst on death"],
+	"dirge": ["near you, their aim frays"],
+	"apotheosis": ["size +15%", "damage taken -20%", "all essence +25%"],
+}
+var draft_opts: Array = []
+var draft_title := ""
+
 func _open_draft() -> void:
 	draft_open = true
-	draft_layer = CanvasLayer.new()
-	add_child(draft_layer)
-	var dim := ColorRect.new()
-	dim.size = Vector2(640, 360)
-	dim.color = Color(0.02, 0.0, 0.05, 0.78)
-	draft_layer.add_child(dim)
-	var title := _label(draft_layer, Vector2(0, 52), 20, Color("#ff4d78"))
-	title.size = Vector2(640, 30)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var opts: Array
 	if branch == "":
-		title.text = "THE CALAMITY EVOLVES — choose your line"
-		opts = BRANCH_DEFS[character]
+		draft_title = "THE MOLT — CHOOSE YOUR LINE"
+		draft_opts = BRANCH_DEFS[character].duplicate()
 	else:
-		title.text = branch.to_upper() + " DEEPENS — choose"
-		opts = NODE_DEFS[branch].filter(func(n): return not nodes.has(n.id))
-		if opts.is_empty():
-			# the line is complete — one crown remains
-			title.text = "THE LINE IS COMPLETE"
-			opts = [{"id": "apotheosis", "name": "APOTHEOSIS — " + branch.to_upper(), "kind": "CAPSTONE",
-				"desc": "become the thing the myths warned about: +15% size, 20% less damage taken, +25% essence"}]
+		draft_title = "THE MOLT — " + branch.to_upper() + " DEEPENS"
+		draft_opts = NODE_DEFS[branch].filter(func(n): return not nodes.has(n.id))
+		if draft_opts.is_empty():
+			draft_title = "THE LINE IS COMPLETE"
+			draft_opts = [{"id": "apotheosis", "name": "APOTHEOSIS", "kind": "CAPSTONE",
+				"desc": "become the thing the myths warned about"}]
 	_sfx("pick")
-	for i in opts.size():
-		var d: Dictionary = opts[i]
-		var btn := Button.new()
-		btn.text = d.name + ("   [%s]" % d.kind if d.has("kind") else "")
-		btn.position = Vector2(70, 100 + i * 64)
-		btn.size = Vector2(500, 30)
-		btn.add_theme_font_size_override("font_size", 13)
-		btn.pressed.connect(_pick_draft.bind(d.id))
-		draft_layer.add_child(btn)
-		var desc := _label(draft_layer, Vector2(78, 131 + i * 64), 9, Color("#c8d0e8"))
-		desc.text = d.desc
+	if draft_ui != null:
+		draft_ui.visible = true
 
 func _pick_draft(id: String) -> void:
 	var picked_name := ""
@@ -3303,9 +3344,8 @@ func _pick_draft(id: String) -> void:
 		essence_mult *= 1.25
 		bio_stage += 1
 		draft_open = false
-		if draft_layer:
-			draft_layer.queue_free()
-			draft_layer = null
+		if draft_ui != null:
+			draft_ui.visible = false
 		impact_frames = 2
 		_pop(pos + Vector2(0, -24), "APOTHEOSIS", Color(2.4, 1.8, 0.8))
 		return
@@ -3328,11 +3368,148 @@ func _pick_draft(id: String) -> void:
 			"blackdawn": eclipse_len += 8.0
 	bio_stage += 1
 	draft_open = false
-	if draft_layer:
-		draft_layer.queue_free()
-		draft_layer = null
+	if draft_ui != null:
+		draft_ui.visible = false
+	_boom(pos, 20, Color(1.8, 0.6, 0.6), 90.0)
 	_pop(pos + Vector2(0, -24), picked_name, Color(2.0, 0.6, 0.7))
 	radius = minf(24.0, radius + 2.0)  # visible growth per evolution
+
+class DraftUI extends Control:
+	var m: Node2D   # main
+	var hover := -1
+	func _init(main_ref: Node2D) -> void:
+		m = main_ref
+		size = Vector2(640, 360)
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		visible = false
+	func _process(_d: float) -> void:
+		if visible:
+			queue_redraw()
+	func _card_rect(i: int, n: int) -> Rect2:
+		var w := 140.0
+		var gap := 14.0
+		var total: float = n * w + (n - 1) * gap
+		var x0: float = 172.0 + (640.0 - 184.0 - total) * 0.5
+		return Rect2(x0 + i * (w + gap), 74.0 + (-8.0 if hover == i else 0.0), w, 218.0)
+	func _gui_input(e: InputEvent) -> void:
+		if not visible:
+			return
+		if e is InputEventMouseMotion:
+			hover = -1
+			for i in m.draft_opts.size():
+				if _card_rect(i, m.draft_opts.size()).has_point(e.position):
+					hover = i
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			for i in m.draft_opts.size():
+				if _card_rect(i, m.draft_opts.size()).has_point(e.position):
+					m._pick_draft(m.draft_opts[i].id)
+					accept_event()
+					return
+	func _draw() -> void:
+		var f: FontFile = m.ui_font
+		var tt: float = Time.get_ticks_msec() * 0.001
+		draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.0, 0.05, 0.93))
+		draw_string(f, Vector2(0, 36), m.draft_title, HORIZONTAL_ALIGNMENT_CENTER, 640, 17, Color(1.9, 0.5, 0.55))
+		draw_string(f, Vector2(0, 52), "what is shed does not return", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color("#8890b0"))
+		# ---- left: the god on its essence pedestal ----
+		var gp := Vector2(88, 178)
+		draw_arc(gp + Vector2(0, 60), 42.0, PI, TAU, 26, Color(1.6, 0.4, 0.4, 0.4 + 0.15 * sin(tt * 2.0)), 1.5)
+		draw_circle(gp + Vector2(0, 60), 42.0, Color(0.5, 0.1, 0.15, 0.14))
+		for e2 in 7:
+			var ey: float = fmod(e2 * 19.7 + tt * 22.0, 78.0)
+			draw_rect(Rect2(gp.x - 26 + fmod(e2 * 31.3, 52.0), gp.y + 52 - ey, 1.5, 1.5),
+				Color(1.8, 0.6, 0.5, 0.8 - ey * 0.01))
+		match m.character:
+			"swarm":
+				draw_circle(gp, 26.0, Color(0.9, 0.12, 0.18, 0.14))
+				draw_circle(gp, 17.0, Color("#2a0614"))
+				for mm in 24:
+					var ma: float = mm * 2.4 + tt * 0.6
+					var mp := gp + Vector2(cos(ma), sin(ma * 1.3)) * (10.0 + fmod(mm * 7.7, 14.0))
+					draw_line(mp, mp + Vector2(2.5, 1), Color(1.7, 0.4, 0.4), 1.0)
+				draw_circle(gp + Vector2(8, -5), 4.0, Color(1.8, 1.1, 0.3))
+			"keraunos":
+				draw_circle(gp, 16.0, Color(0.10, 0.11, 0.18))
+				for h2 in 3:
+					var hh := gp + Vector2((h2 - 1) * 12.0, -22.0 + sin(tt * 2.0 + h2) * 2.0)
+					draw_line(gp + Vector2((h2 - 1) * 4.0, -8), hh, Color(0.10, 0.11, 0.18), 3.0)
+					draw_circle(hh, 3.5, Color(0.16, 0.18, 0.28))
+					draw_circle(hh + Vector2(2, 0), 1.2, Color(1.2, 2.0, 2.6))
+				if randf() < 0.1:
+					draw_line(gp + Vector2(randf_range(-14, 14), -20), gp + Vector2(randf_range(-18, 18), 8), Color(1.4, 1.9, 2.4, 0.7), 1.0)
+			"tzitzimitl":
+				var prev := gp + Vector2(-22, 14)
+				for s2 in 9:
+					var f4: float = s2 / 8.0
+					var npt := gp + Vector2(-22 + f4 * 44.0, 14.0 - sin(f4 * PI) * 26.0 + sin(tt * 2.0 + f4 * 5.0) * 2.0)
+					draw_line(prev, npt, Color(0.10, 0.48, 0.47), 5.0 * (1.0 - absf(f4 - 0.5)))
+					prev = npt
+				draw_circle(prev, 4.5, Color(0.23, 0.72, 0.66))
+				draw_circle(prev + Vector2(2, -1), 1.3, Color(2.4, 1.5, 0.3))
+			"drowned":
+				draw_colored_polygon(PackedVector2Array([gp + Vector2(-14, 30), gp + Vector2(-12, -6),
+					gp + Vector2(-4, -24), gp + Vector2(5, -23), gp + Vector2(12, -4), gp + Vector2(14, 30)]),
+					Color(0.02, 0.08, 0.10))
+				for tn in 5:
+					draw_line(gp + Vector2((tn - 2) * 3.5, -12), gp + Vector2((tn - 2) * 4.5 + sin(tt * 2.0 + tn) * 2.0, -2 + (tn % 2) * 4), Color(0.04, 0.13, 0.15), 2.0)
+				draw_circle(gp + Vector2(-4, -17), 1.6, Color(1.3, 2.4, 2.2))
+				draw_circle(gp + Vector2(4, -17), 1.6, Color(1.3, 2.4, 2.2))
+			"rider":
+				draw_colored_polygon(PackedVector2Array([gp + Vector2(16, 26), gp + Vector2(18, -2),
+					gp + Vector2(6, -22), gp + Vector2(-4, -26), gp + Vector2(-16, -14 + sin(tt * 2.0) * 2.0),
+					gp + Vector2(-24, 8), gp + Vector2(-18, 26)]), Color(0.075, 0.06, 0.09))
+				draw_circle(gp + Vector2(-2, -20), 3.5, Color(0.88, 0.83, 0.66))
+				draw_circle(gp + Vector2(-1, -21), 0.9, Color(1.9, 1.6, 0.6))
+				draw_arc(gp + Vector2(2, -30), 12.0, -0.4, 1.5, 12, Color(0.97, 0.93, 0.78), 2.2)
+		draw_string(f, Vector2(8, 258), m.character.to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 160, 10, Color(1.7, 0.5, 0.5))
+		var stage_s: String = ("stage %d" % (m.bio_stage + 1)) + ("" if m.branch == "" else " - " + m.branch.to_upper())
+		draw_string(f, Vector2(8, 270), stage_s, HORIZONTAL_ALIGNMENT_CENTER, 160, 7, Color("#8890b0"))
+		# ---- the cards ----
+		for i in m.draft_opts.size():
+			var d: Dictionary = m.draft_opts[i]
+			var r := _card_rect(i, m.draft_opts.size())
+			var hovered: bool = hover == i
+			var bord: Color = Color(1.9, 0.6, 0.6) if hovered else Color(0.4, 0.32, 0.45)
+			if hovered:
+				draw_rect(Rect2(r.position - Vector2(4, 4), r.size + Vector2(8, 8)), Color(1.9, 0.6, 0.6, 0.10))
+			draw_rect(r, Color("#151020"))
+			for edge in [Rect2(r.position, Vector2(r.size.x, 2)), Rect2(r.position + Vector2(0, r.size.y - 2), Vector2(r.size.x, 2)),
+					Rect2(r.position, Vector2(2, r.size.y)), Rect2(r.position + Vector2(r.size.x - 2, 0), Vector2(2, r.size.y))]:
+				draw_rect(edge, bord)
+			for corner in [Vector2.ZERO, Vector2(r.size.x - 6, 0), Vector2(0, r.size.y - 6), Vector2(r.size.x - 6, r.size.y - 6)]:
+				draw_rect(Rect2(r.position + corner, Vector2(6, 6)), bord)
+			var cxx: float = r.position.x + r.size.x * 0.5
+			# kind ribbon
+			var kind_s: String = d.get("kind", "LINE")
+			var rib: Color = Color(0.9, 0.4, 0.2) if "ACTIVE" in kind_s else (Color(0.8, 0.65, 0.25) if kind_s == "CAPSTONE" else Color(0.35, 0.5, 0.75))
+			draw_rect(Rect2(r.position.x + 8, r.position.y + 8, r.size.x - 16, 12), Color(rib.r, rib.g, rib.b, 0.22))
+			draw_string(f, Vector2(r.position.x, r.position.y + 17), kind_s, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 6, rib.lightened(0.4))
+			# name
+			draw_string(f, Vector2(r.position.x, r.position.y + 38), d.name, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 9, Color(0.95, 0.9, 1.0))
+			# flavor, wrapped at ~25 chars
+			var words: PackedStringArray = str(d.get("desc", "")).split(" ")
+			var line := ""
+			var ly: float = r.position.y + 54.0
+			for w2 in words:
+				if line.length() + w2.length() > 22:
+					draw_string(f, Vector2(r.position.x, ly), line, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 6, Color("#8890b0"))
+					ly += 9.0
+					line = w2
+				else:
+					line += (" " if line != "" else "") + w2
+				if ly > r.position.y + 98.0:
+					break
+			if line != "" and ly <= r.position.y + 98.0:
+				draw_string(f, Vector2(r.position.x, ly), line, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 6, Color("#8890b0"))
+			# WHAT CHANGES
+			draw_rect(Rect2(r.position.x + 8, r.position.y + 112, r.size.x - 16, 1), Color(bord.r, bord.g, bord.b, 0.5))
+			draw_string(f, Vector2(r.position.x, r.position.y + 124), "WHAT CHANGES", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 6, Color(1.6, 1.3, 0.6))
+			var dls: Array = m.DELTA.get(d.id, [])
+			for dl in dls.size():
+				draw_string(f, Vector2(r.position.x + 12, r.position.y + 138 + dl * 11), "- " + str(dls[dl]),
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color(0.72, 0.88, 0.72))
+			draw_string(f, Vector2(r.position.x, r.position.y + r.size.y - 10), "[%d]" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 7, Color(0.6, 0.55, 0.7))
+		draw_string(f, Vector2(0, 348), "1 / 2 / 3 or click - the unpicked wither away", HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(0.6, 0.55, 0.7))
 
 func _kill_unit(u: Dictionary) -> void:
 	var base: int
@@ -3346,6 +3523,7 @@ func _kill_unit(u: Dictionary) -> void:
 			threat = minf(100.0, threat + 8.0)
 			_pop(u.pos + Vector2(0, -14), "LIVE FEED SEVERED — THE WORLD SAW", Color(2.0, 0.5, 0.4))
 		"flamer": base = 350
+		"militia": base = 100
 		"brood": base = 150
 		"herald":
 			base = 20000
@@ -3438,7 +3616,14 @@ func _army(delta: float) -> void:
 		var x: float = pos.x + side * randf_range(360, 560)
 		if x > 30 and x < world_w - 30:
 			var roll := randf()
-			if tier >= 5 and not champ_spawned and not prologue:
+			if node_militia:
+				# the army has not come yet — the province defends itself
+				if roll < 0.3:
+					units.append({"kind": "police", "pos": Vector2(x, 0), "cd": randf_range(0.8, 1.4), "hp": 1})
+				else:
+					for i in 2:
+						units.append({"kind": "militia", "pos": Vector2(x + i * 9.0, 0), "cd": randf_range(1.2, 2.4), "hp": 1})
+			elif tier >= 5 and not champ_spawned and not prologue:
 				# the world sends its best — a named champion, once per battle
 				champ_spawned = true
 				var cname: String = ["COL. VASHKO", "MARSHAL HELVIG", "CMDR. OKONKWO", "GEN. THARN"][randi() % 4]
@@ -3536,6 +3721,12 @@ func _army(delta: float) -> void:
 				u.pos.y = -170.0 + sin(t * 1.4) * 10.0
 				if absf(dx) < 280.0:
 					_feed("fear", 0.5 * delta)
+			"militia":
+				# farmers with rifles — brave until it looks at them
+				if absf(dx) < 75.0:
+					u.pos.x -= signf(dx) * 34.0 * delta * slow
+				else:
+					u.pos.x += signf(dx) * 20.0 * delta * slow
 			"flamer":
 				# closes in and hoses the low air with fire
 				if absf(dx) > 55.0:
@@ -3613,7 +3804,7 @@ func _army(delta: float) -> void:
 					"heavy": true, "arc": true, "splash": true})
 				u.cd = randf_range(2.2, 3.4) / defense
 			else:
-				var speed: float = 120.0 if u.kind in ["police", "soldier"] else 165.0
+				var speed: float = 120.0 if u.kind in ["police", "soldier", "militia"] else 165.0
 				var dirv := (lead - origin).normalized()
 				if blackout_t > 0.0:
 					dirv = dirv.rotated(randf_range(-0.55, 0.55))  # blind in the dark
@@ -3778,15 +3969,21 @@ func _finish(win: bool, et: Dictionary) -> void:
 		Global.c_bio_stage = bio_stage
 		Global.c_essence = essence_eaten
 		var bt := ""
+		Global.razed.append(Global.node_params.get("map_node", Global.map_pos))
+		var place_s: String = node_place if node_place != "" else str(city_def.get("name", "THE CITY"))
+		var reactions := ["THE PROVINCE PRAYS", "THE GUARD MOBILIZES", "MARTIAL LAW DECLARED",
+			"THE CAPITAL IS WATCHING", "NOTHING ANSWERS ANYMORE"]
+		Global.headline = "%s IS ASH — %s" % [place_s.to_upper(), reactions[mini(4, Global.razed.size() - 1)]]
 		if Global.act == 1:
-			if Global.node_i < 2:
-				Global.node_i += 1
-				bt = "MARCH ON"
-			else:
+			if Global.node_params.get("provcity", false):
 				Global.act = 2
+				Global.razed = []
+				Global.map_pos = 0
+				Global.headline = ""
 				bt = "THE CRUSADE BEGINS"
+			else:
+				bt = "MARCH ON"
 		else:
-			Global.razed.append(Global.node_params.get("map_node", Global.map_pos))
 			if Global.node_params.get("capital", false):
 				bt = "THE CONTINENT IS ASH"
 			else:
@@ -3813,6 +4010,10 @@ func _crusade_button(label: String, win: bool) -> void:
 	btn.size = Vector2(180, 30)
 	btn.add_theme_font_override("font", ui_font)
 	btn.add_theme_font_size_override("font_size", 13)
+	btn.disabled = true
+	get_tree().create_timer(0.8).timeout.connect(func():
+		if is_instance_valid(btn):
+			btn.disabled = false)
 	btn.pressed.connect(func():
 		Engine.time_scale = 1.0
 		if not win:
@@ -3835,6 +4036,11 @@ func _end(m: String, s: String) -> void:
 		% [buildings_razed, people_killed, unit_kills, int(run_time) / 60, int(run_time) % 60]
 
 func _input(e: InputEvent) -> void:
+	if draft_open and e is InputEventKey and e.pressed:
+		var ki: int = e.physical_keycode - KEY_1
+		if ki >= 0 and ki < draft_opts.size():
+			_pick_draft(draft_opts[ki].id)
+			return
 	if over and e.is_action_pressed("restart"):
 		get_tree().reload_current_scene()
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
@@ -3870,6 +4076,11 @@ func _fmt(n: int) -> String:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	var dlayer := CanvasLayer.new()
+	dlayer.layer = 97
+	add_child(dlayer)
+	draft_ui = DraftUI.new(self)
+	dlayer.add_child(draft_ui)
 	hud.score = _label(layer, Vector2(10, 4), 16, Color("#e8f0ff"))
 	hud.combo = _label(layer, Vector2(10, 24), 11, Color("#ff4d78"))
 	hud.biolbl = _label(layer, Vector2(10, 40), 8, Color("#8ad08a"))
@@ -4221,6 +4432,14 @@ func _draw_sky(left: float, right: float, cx: float) -> void:
 func _draw_backdrop(left: float, right: float, cx: float) -> void:
 	# villages get hills and pines behind them, not a metropolis skyline
 	if node_kind in ["hamlet", "town", "prologue"]:
+		# the province city waits on the horizon — closer after every ruin
+		if Global.mode == "crusade" and Global.act == 1 and tex_sky_a != null and node_kind != "prologue":
+			var hprog: float = 0.22 + minf(1.0, Global.razed.size() * 0.22) * 0.55
+			var cw2: float = tex_sky_a.get_width() * hprog
+			var ch2: float = tex_sky_a.get_height() * hprog
+			var hx0: float = world_w * 0.85 - cx * 0.06
+			draw_texture_rect(tex_sky_a, Rect2(hx0 - cw2 * 0.5, -60.0 - ch2, cw2, ch2), false, Color(0.32, 0.26, 0.4, 0.9))
+			draw_rect(Rect2(hx0 - cw2 * 0.5, -60.0 - ch2, cw2, ch2), Color(0.1, 0.07, 0.18, 0.35))
 		for lay in [[0.12, 78.0, Color(0.17, 0.14, 0.25)], [0.3, 44.0, Color(0.11, 0.09, 0.17)]]:
 			var f2: float = lay[0]
 			var hgt: float = lay[1]
@@ -4600,6 +4819,14 @@ func _draw_actors() -> void:
 				# camera lens glint toward the story
 				var lens := (pos - p).normalized()
 				draw_circle(p + lens * 9.0, 1.2, Color(1.6, 1.6, 2.2, 0.7 + 0.3 * sin(t * 6.0)))
+			"militia":
+				var mleg: float = sin(t * 9.0 + p.x * 0.8) * 1.4
+				draw_rect(Rect2(p.x - 1, p.y - 7, 3, 5), Color("#6a5638"))
+				draw_rect(Rect2(p.x - 1, p.y - 9, 3, 2), Color("#caa87a"))
+				draw_rect(Rect2(p.x - 2.5, p.y - 10, 6, 1), Color("#a08a50"))
+				draw_line(Vector2(p.x, p.y - 2), Vector2(p.x - mleg, p.y), Color("#4a3c28"), 1)
+				draw_line(Vector2(p.x, p.y - 2), Vector2(p.x + mleg, p.y), Color("#4a3c28"), 1)
+				draw_line(Vector2(p.x, p.y - 5), Vector2(p.x + signf(pos.x - p.x) * 5, p.y - 7), Color("#2c2418"), 1)
 			"soldier":
 				var sleg: float = sin(t * 10.0 + p.x * 0.7) * 1.6
 				draw_rect(Rect2(p.x - 1, p.y - 7, 3, 5), Color("#3a4432"))

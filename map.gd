@@ -28,6 +28,25 @@ const RELICS := [
 	{"id": "carrionwind", "name": "CARRION WIND", "desc": "+30% tribute from every city"},
 ]
 
+const ACT1_NODES := [
+	{"id": 0, "pos": Vector2(80, 265), "kind": "start", "name": "THE WAKING"},
+	{"id": 1, "pos": Vector2(185, 235), "kind": "hamlet", "links": [0]},
+	{"id": 2, "pos": Vector2(295, 165), "kind": "farms", "links": [1]},
+	{"id": 3, "pos": Vector2(305, 300), "kind": "mill", "links": [1]},
+	{"id": 4, "pos": Vector2(415, 235), "kind": "town", "links": [2, 3]},
+	{"id": 5, "pos": Vector2(475, 135), "kind": "relicsite", "name": "OLD SHRINE", "links": [4]},
+	{"id": 6, "pos": Vector2(565, 245), "kind": "provcity", "links": [4, 5]},
+]
+const PROVINCE_NAMES := {
+	"ashport": ["CINDER ROW", "GREYWATER FARMS", "THE COKEWORKS", "KILNMOOR", "ASHPORT"],
+	"thornspire": ["BLACKFEN", "PILGRIM'S FIELD", "THE SAWGATE", "CANDLEMERE", "THORNSPIRE"],
+	"teotl": ["XOCHITAN", "THE MILPA TERRACES", "OBSIDIAN CAMP", "TEPETLAN", "TEOTL"],
+	"maren": ["SALTHOLLOW", "THE OYSTER BEDS", "WRECKER'S MILL", "BRINEWATCH", "PORT MAREN"],
+	"kowloon": ["PYLON SHANTIES", "THE PADDY SPRAWL", "SCRAP QUARTER", "NEON FRINGE", "NEW KOWLOON"],
+}
+
+var ns: Array = []               # active node set (act 1 rise map or act 2 continent)
+
 const FATE_NAMES := {
 	"richfeeding": "RICH FEEDING", "garrisoned": "GARRISONED", "cultshrine": "CULT SHRINE",
 	"refugees": "REFUGEE COLUMN", "stormcrossing": "STORM CROSSING", "quietroads": "QUIET ROADS",
@@ -62,8 +81,21 @@ var ev_extra := {}               # event outcome folded into the next launch
 func _ready() -> void:
 	Global.music("map")
 	ui_font = load("res://art/Silkscreen-Regular.ttf")
-	# roll each crusade's road-fates once — the map is a hand you're dealt
-	if not Global.node_fates.has("rolled"):
+	# pick the node set: act 1 = the Rise (one province), act 2 = the continent
+	if Global.act == 1:
+		ns = []
+		var pnames: Array = PROVINCE_NAMES.get(Global.province, PROVINCE_NAMES["kowloon"])
+		var ni := 0
+		for n0 in ACT1_NODES:
+			var n: Dictionary = n0.duplicate()
+			if not n.has("name"):
+				n.name = pnames[mini(ni, pnames.size() - 1)]
+				ni += 1
+			ns.append(n)
+	else:
+		ns = NODES
+	# roll each crusade's road-fates once — the map is a hand you're dealt (continent only)
+	if Global.act == 2 and not Global.node_fates.has("rolled"):
 		Global.node_fates["rolled"] = true
 		var pool := ["richfeeding", "garrisoned", "cultshrine", "refugees",
 			"stormcrossing", "quietroads", "titheroad", "cache"]
@@ -80,7 +112,7 @@ func _ready() -> void:
 func _reachable(id: int) -> bool:
 	if id == Global.map_pos or id in Global.razed:
 		return false
-	var n: Dictionary = NODES[id]
+	var n: Dictionary = ns[id]
 	for l in n.get("links", []):
 		if l == Global.map_pos or l in Global.razed:
 			return true
@@ -93,7 +125,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		get_tree().change_scene_to_file("res://menu.tscn")
 	if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 		var mp := get_global_mouse_position()
-		for n in NODES:
+		for n in ns:
 			if n.pos.distance_to(mp) < 16.0 and _reachable(n.id):
 				if n.kind == "relicsite":
 					# no battle here — an old power waits to be claimed
@@ -172,7 +204,7 @@ func _apply_ev(fx: Dictionary) -> void:
 func _obj_for(n: Dictionary) -> String:
 	# deterministic per (node, progress) so the map can promise what the battle delivers
 	match n.kind:
-		"hamlet": return "raze"
+		"hamlet", "farms", "mill", "provcity": return "raze"
 		"town": return ["raze", "blackout", "extinction"][(n.id * 7 + Global.razed.size() * 3) % 3]
 		"capital": return "decapitation"
 		"city": return ["raze", "decapitation", "extinction", "blackout", "terror", "feast"][(n.id * 5 + Global.razed.size()) % 6]
@@ -185,18 +217,32 @@ func _launch(n: Dictionary) -> void:
 	if fate == "quietroads":
 		Global.alert_discount += 1
 	var alert: int = maxi(0, Global.razed.size() - Global.alert_discount)
-	var params := {"map_node": n.id, "alert": alert, "kind": n.kind, "objective": _obj_for(n), "fate": fate}
+	var params := {"map_node": n.id, "alert": alert, "kind": n.kind, "objective": _obj_for(n), "fate": fate,
+		"place": n.name}
 	if fate == "cultshrine":
 		params.allies_bonus = 2
 	params.merge(ev_extra, true)
 	ev_extra = {}
+	if Global.act == 1:
+		Global.city = Global.province
 	match n.kind:
 		"hamlet":
-			params.world_w = 2000.0
-			params.tier_cap = 2 + int(alert / 3.0)
+			params.world_w = 2000.0 if Global.act == 2 else 1900.0
+			params.tier_cap = (2 + int(alert / 3.0)) if Global.act == 2 else 1
+			params.militia = Global.act == 1
+		"farms", "mill":
+			params.kind = "hamlet"
+			params.world_w = 2300.0
+			params.tier_cap = 2
+			params.militia = true
 		"town":
 			params.world_w = 3000.0
 			params.tier_cap = 3 + int(alert / 3.0)
+		"provcity":
+			params.kind = "city"
+			params.world_w = 4600.0
+			params.tier_cap = 5
+			params.provcity = true
 		"capital":
 			params.world_w = 5200.0
 			params.tier_cap = 5
@@ -261,39 +307,43 @@ func _draw() -> void:
 		var hx := 30.0 + fmod(sin(i * 37.7) * 917.0, 1.0) * 580.0
 		var hy := 70.0 + fmod(sin(i * 71.3) * 517.0, 1.0) * 260.0
 		draw_circle(Vector2(hx, hy), 8.0 + fmod(float(i), 4.0) * 4.0, Color(0.1, 0.09, 0.15, 0.5))
-	draw_string(f, Vector2(320, 34), "ACT II — THE CRUSADE", HORIZONTAL_ALIGNMENT_CENTER, -1, 18, Color(1.8, 0.5, 0.5))
-	draw_string(f, Vector2(320, 52), "WORLD ALERT %d   ·   TRIBUTE %d   ·   ESC — retreat" % [maxi(0, Global.razed.size() - Global.alert_discount), Global.tribute],
-		HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color("#9ab0d0"))
+	var title_s: String = "ACT II — THE CRUSADE" if Global.act == 2 else 		"ACT I — THE RISE OF " + str(PROVINCE_NAMES.get(Global.province, ["", "", "", "", "?"])[4])
+	draw_string(f, Vector2(0, 34), title_s, HORIZONTAL_ALIGNMENT_CENTER, 640, 18, Color(1.8, 0.5, 0.5))
+	if Global.headline != "":
+		draw_string(f, Vector2(0, 344), "THE PROVINCIAL HERALD:  " + Global.headline,
+			HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(1.5, 1.3, 0.8, 0.9))
+	draw_string(f, Vector2(0, 52), "WORLD ALERT %d   ·   TRIBUTE %d   ·   ESC — retreat" % [maxi(0, Global.razed.size() - Global.alert_discount), Global.tribute],
+		HORIZONTAL_ALIGNMENT_CENTER, 640, 9, Color("#9ab0d0"))
 	# THE ROAR — the louder you feed, the farther you are heard
 	var slain: int = Global.heralds_slain.size()
 	if slain < 3 and not Global.herald_queue.is_empty():
 		var gate: float = Global.ROAR_GATES[mini(slain, 2)]
 		var heard: bool = Global.roar >= gate
-		draw_string(f, Vector2(320, 64), "THE ROAR  %d / %d%s" % [int(Global.roar), int(gate),
+		draw_string(f, Vector2(0, 64), "THE ROAR  %d / %d%s" % [int(Global.roar), int(gate),
 			"    —    SOMETHING HAS HEARD YOU" if heard else ""],
-			HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
+			HORIZONTAL_ALIGNMENT_CENTER, 640, 8,
 			Color(2.0, 0.5, 1.2) if heard else Color(1.2, 0.7, 1.3, 0.8))
 	elif slain >= 3:
-		draw_string(f, Vector2(320, 64), "THREE HERALDS DEVOURED — THE STARS ARE LISTENING",
-			HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(2.0, 1.4, 2.2))
+		draw_string(f, Vector2(0, 64), "THREE HERALDS DEVOURED — THE STARS ARE LISTENING",
+			HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color(2.0, 1.4, 2.2))
 	# roads
-	for n in NODES:
+	for n in ns:
 		for l in n.get("links", []):
-			var a: Vector2 = NODES[l].pos
+			var a: Vector2 = ns[l].pos
 			var b: Vector2 = n.pos
 			var burnt: bool = (n.id in Global.razed or n.id == Global.map_pos) and (l in Global.razed or l == Global.map_pos)
 			draw_line(a, b, Color(0.5, 0.15, 0.1, 0.8) if burnt else Color(0.25, 0.22, 0.35), 2.0 if burnt else 1.0)
 	# nodes
-	for n in NODES:
+	for n in ns:
 		var col: Color
 		var r := 8.0
 		match n.kind:
 			"start": col = Color(0.4, 0.35, 0.5)
-			"hamlet":
+			"hamlet", "farms", "mill":
 				col = Color(0.5, 0.6, 0.45)
 				r = 6.0
 			"town": col = Color(0.6, 0.55, 0.4)
-			"capital":
+			"capital", "provcity":
 				col = Color(1.8, 1.2, 0.4)
 				r = 12.0
 			"relicsite":
@@ -311,14 +361,14 @@ func _draw() -> void:
 		if razed_n:
 			draw_line(n.pos + Vector2(-4, -4), n.pos + Vector2(4, 4), Color(0.9, 0.3, 0.2), 1.5)
 			draw_line(n.pos + Vector2(-4, 4), n.pos + Vector2(4, -4), Color(0.9, 0.3, 0.2), 1.5)
-		draw_string(f, n.pos + Vector2(0, -r - 5), n.name, HORIZONTAL_ALIGNMENT_CENTER, -1, 7,
+		draw_string(f, n.pos + Vector2(-70, -r - 5), n.name, HORIZONTAL_ALIGNMENT_CENTER, 140, 7,
 			Color(0.9, 0.85, 0.8, 0.85))
 		# reachable nodes show what the war will ask of you — and what the road carries
-		if _reachable(n.id) and n.kind in ["hamlet", "town", "city", "capital"]:
-			draw_string(f, n.pos + Vector2(0, r + 12), _obj_for(n).to_upper(),
-				HORIZONTAL_ALIGNMENT_CENTER, -1, 6, Color(1.5, 1.3, 0.7, 0.8))
+		if _reachable(n.id) and n.kind in ["hamlet", "farms", "mill", "town", "city", "capital", "provcity"]:
+			draw_string(f, n.pos + Vector2(-70, r + 12), _obj_for(n).to_upper(),
+				HORIZONTAL_ALIGNMENT_CENTER, 140, 6, Color(1.5, 1.3, 0.7, 0.8))
 			var fate2: String = Global.node_fates.get(str(n.id), "")
 			if fate2 != "":
-				draw_string(f, n.pos + Vector2(0, r + 20), FATE_NAMES.get(fate2, ""),
-					HORIZONTAL_ALIGNMENT_CENTER, -1, 6, Color(1.2, 0.7, 1.5, 0.85))
-	draw_string(f, Vector2(320, 350), "choose where the ruin goes next", HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(0.7, 0.65, 0.7, 0.6))
+				draw_string(f, n.pos + Vector2(-70, r + 20), FATE_NAMES.get(fate2, ""),
+					HORIZONTAL_ALIGNMENT_CENTER, 140, 6, Color(1.2, 0.7, 1.5, 0.85))
+	draw_string(f, Vector2(0, 334), "choose where the ruin goes next", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color(0.7, 0.65, 0.7, 0.6))

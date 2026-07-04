@@ -8,7 +8,9 @@ var mutator := ""                # skirmish modifier: midnight | glass | mobiliz
 
 # --- crusade state (persists across nodes; saved to disk) ---
 var act := 1
-var node_i := 0                  # act 1 chain position
+var node_i := 0                  # legacy act-1 counter (growth ramp uses razed now)
+var province := "kowloon"        # act 1 happens in ONE city's region
+var headline := ""               # last front page, shown on the map
 var map_pos := 0                 # act 2: current map node id
 var razed: Array = []            # act 2: razed map node ids
 var tribute := 0
@@ -39,6 +41,7 @@ func _ready() -> void:
 	if OS.get_environment("CAL_KIND") != "":
 		mode = "crusade"
 		node_params = {"kind": OS.get_environment("CAL_KIND"), "world_w": 2200.0, "tier_cap": 3,
+			"militia": OS.get_environment("CAL_MILITIA") != "",
 			"objective": OS.get_environment("CAL_OBJ") if OS.get_environment("CAL_OBJ") != "" else "raze"}
 
 # ============ music: threat-layered synth stems, alive across scenes ============
@@ -123,8 +126,13 @@ func _mwav(data: PackedByteArray, rate: int, n: int) -> AudioStreamWAV:
 	wav.loop_end = n
 	return wav
 
+const PROVINCE_OF := {"swarm": "ashport", "keraunos": "thornspire", "tzitzimitl": "teotl",
+	"drowned": "maren", "rider": "kowloon"}
+
 func reset_crusade(chr: String) -> void:
 	character = chr
+	province = PROVINCE_OF.get(chr, "kowloon")
+	headline = ""
 	mode = "crusade"
 	act = 1
 	node_i = 0
@@ -149,15 +157,10 @@ func reset_crusade(chr: String) -> void:
 	save_crusade()
 
 func launch_act1() -> void:
+	# act 1 lives on its own Rise map now
 	mode = "crusade"
-	var cities := ["kowloon", "thornspire", "ashport", "teotl", "maren"]
-	city = cities[randi() % cities.size()]
-	match node_i:
-		0: node_params = {"kind": "hamlet", "world_w": 1900.0, "tier_cap": 1, "objective": "raze"}
-		1: node_params = {"kind": "town", "world_w": 2900.0, "tier_cap": 3,
-			"objective": ["blackout", "extinction"][randi() % 2]}
-		_: node_params = {"kind": "city", "world_w": 4600.0, "tier_cap": 5, "objective": "raze"}
-	get_tree().change_scene_to_file("res://main.tscn")
+	act = 1
+	get_tree().change_scene_to_file("res://map.tscn")
 
 func save_crusade() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -165,7 +168,7 @@ func save_crusade() -> void:
 		f.store_string(JSON.stringify({"character": character, "act": act, "node_i": node_i,
 			"map_pos": map_pos, "razed": razed, "tribute": tribute, "relics": relics,
 			"c_branch": c_branch, "c_nodes": c_nodes, "c_bio_stage": c_bio_stage, "c_essence": c_essence,
-			"node_fates": node_fates, "alert_discount": alert_discount,
+			"node_fates": node_fates, "alert_discount": alert_discount, "province": province,
 			"roar": roar, "herald_queue": herald_queue, "heralds_slain": heralds_slain,
 			"grafts": grafts, "act3_ready": act3_ready}))
 
@@ -188,6 +191,7 @@ func load_crusade() -> bool:
 	c_bio_stage = int(d.get("c_bio_stage", 0))
 	c_essence = float(d.get("c_essence", 0.0))
 	node_fates = d.get("node_fates", {})
+	province = d.get("province", PROVINCE_OF.get(character, "kowloon"))
 	alert_discount = int(d.get("alert_discount", 0))
 	roar = float(d.get("roar", 0.0))
 	herald_queue = d.get("herald_queue", [])

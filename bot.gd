@@ -82,7 +82,7 @@ func _drive_map(map: Node) -> void:
 		return
 	if Engine.get_frames_drawn() % 40 != 0:
 		return
-	for n in map.NODES:
+	for n in map.ns:
 		if map._reachable(n.id):
 			if n.kind == "relicsite":
 				Global.map_pos = n.id
@@ -111,11 +111,10 @@ func _drive_battle(m: Node, delta: float) -> void:
 			if cb != null:
 				cb.emit_signal("pressed")
 		return
-	# evolution drafts — take the first offer
+	# evolution drafts — take the first offer (THE MOLT has no buttons)
 	if m.get("draft_open"):
-		var db := _find_button(m.get("draft_layer"))
-		if db != null:
-			db.emit_signal("pressed")
+		if not m.draft_opts.is_empty():
+			m._pick_draft(m.draft_opts[0].id)
 		return
 	# end screen — advance the crusade, or record the skirmish result
 	if m.get("over"):
