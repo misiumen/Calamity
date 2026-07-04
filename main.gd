@@ -341,24 +341,29 @@ func _bake_drowned() -> void:
 	var D2 := Color("#2e5a62")
 	var D3 := Color("#4a8a88")
 	var GL := Color("#b8e8d8")
-	var img := Image.create(36, 32, false, Image.FORMAT_RGBA8)
-	# hunched mass
-	for px in [[8, 6, 22, 20, D2], [10, 4, 16, 6, D2], [6, 12, 6, 12, D1], [26, 10, 6, 14, D1],
-			[12, 6, 14, 5, D3], [10, 24, 18, 4, D1]]:
-		img.fill_rect(Rect2i(px[0], px[1], px[2], px[3]), px[4])
-	# barnacle glints
-	for mp in [[13, 9], [20, 8], [24, 13], [11, 16], [17, 19]]:
-		img.set_pixel(mp[0], mp[1], D3)
-	# tentacle beard
-	for tb in 5:
-		var tx := 11 + tb * 4
-		img.fill_rect(Rect2i(tx, 22, 2, 7 + (tb % 3) * 2), D1)
-		img.set_pixel(tx, 30, D2)
-	# eyes — a row of pale lights
-	for e in [[14, 11], [18, 10], [22, 11], [16, 14], [20, 14]]:
-		img.set_pixel(e[0], e[1], GL)
-	_outline(img, OUT)
-	tex_drowned = ImageTexture.create_from_image(img)
+	# two frames: the beard sways, the mass breathes
+	for phase in 2:
+		var img := Image.create(36, 32, false, Image.FORMAT_RGBA8)
+		# hunched mass
+		for px in [[8, 6 + phase, 22, 20 - phase, D2], [10, 4 + phase, 16, 6, D2], [6, 12, 6, 12, D1],
+				[26, 10, 6, 14, D1], [12, 6 + phase, 14, 5, D3], [10, 24, 18, 4, D1]]:
+			img.fill_rect(Rect2i(px[0], px[1], px[2], px[3]), px[4])
+		# barnacle glints
+		for mp in [[13, 9], [20, 8], [24, 13], [11, 16], [17, 19]]:
+			img.set_pixel(mp[0], mp[1] + phase, D3)
+		# tentacle beard — alternating drift
+		for tb in 5:
+			var tx := 11 + tb * 4
+			img.fill_rect(Rect2i(tx + (phase if tb % 2 == 0 else 0), 22, 2, 7 + ((tb + phase) % 3) * 2), D1)
+			img.set_pixel(tx, 30, D2)
+		# eyes — a row of pale lights
+		for e in [[14, 11], [18, 10], [22, 11], [16, 14], [20, 14]]:
+			img.set_pixel(e[0], e[1] + phase, GL)
+		_outline(img, OUT)
+		if phase == 0:
+			tex_drowned = ImageTexture.create_from_image(img)
+		else:
+			tex_drowned_b = ImageTexture.create_from_image(img)
 
 func _bake_rider() -> void:
 	var OUT := Color("#0c0a0a")
@@ -366,27 +371,34 @@ func _bake_rider() -> void:
 	var BONE2 := Color("#eae0c4")
 	var SHRD := Color("#3a3430")   # shroud
 	var SHRD2 := Color("#57504a")
-	var img := Image.create(34, 30, false, Image.FORMAT_RGBA8)
-	# gaunt horse: body, neck, skull head, legs
-	img.fill_rect(Rect2i(6, 14, 20, 6), BONE)
-	img.fill_rect(Rect2i(4, 15, 4, 4), BONE)
-	img.fill_rect(Rect2i(24, 10, 4, 6), BONE)   # neck
-	img.fill_rect(Rect2i(26, 8, 7, 4), BONE2)   # skull
-	img.set_pixel(31, 9, OUT)                   # eye socket
-	for leg in [[8, 20], [13, 20], [19, 20], [24, 20]]:
-		img.fill_rect(Rect2i(leg[0], leg[1], 2, 9), BONE)
-	# ribs showing
-	for r in 3:
-		img.fill_rect(Rect2i(10 + r * 4, 15, 1, 4), BONE2)
-	# the rider: hooded shroud + scythe
-	img.fill_rect(Rect2i(12, 4, 8, 11), SHRD)
-	img.fill_rect(Rect2i(13, 2, 6, 4), SHRD2)   # hood
-	img.fill_rect(Rect2i(15, 4, 2, 1), Color(1.8, 1.5, 0.6))  # eye glow
-	img.fill_rect(Rect2i(20, 0, 1, 13), SHRD2)  # scythe haft
-	img.fill_rect(Rect2i(21, 0, 6, 2), BONE2)   # blade
-	img.set_pixel(26, 2, BONE2)
-	_outline(img, OUT)
-	tex_rider = ImageTexture.create_from_image(img)
+	# two frames: legs gather and reach — a real gallop
+	for phase in 2:
+		var img := Image.create(34, 30, false, Image.FORMAT_RGBA8)
+		# gaunt horse: body, neck, skull head, legs
+		img.fill_rect(Rect2i(6, 14, 20, 6), BONE)
+		img.fill_rect(Rect2i(4, 15, 4, 4), BONE)
+		img.fill_rect(Rect2i(24, 10, 4, 6), BONE)   # neck
+		img.fill_rect(Rect2i(26, 8, 7, 4), BONE2)   # skull
+		img.set_pixel(31, 9, OUT)                   # eye socket
+		var legs: Array = [[8, 20, 9], [13, 20, 9], [19, 20, 9], [24, 20, 9]] if phase == 0 \
+			else [[6, 20, 8], [15, 20, 7], [17, 20, 8], [26, 20, 7]]
+		for leg in legs:
+			img.fill_rect(Rect2i(leg[0], leg[1], 2, leg[2]), BONE)
+		# ribs showing
+		for r in 3:
+			img.fill_rect(Rect2i(10 + r * 4, 15, 1, 4), BONE2)
+		# the rider: hooded shroud + scythe
+		img.fill_rect(Rect2i(12, 4, 8, 11), SHRD)
+		img.fill_rect(Rect2i(13, 2, 6, 4), SHRD2)   # hood
+		img.fill_rect(Rect2i(15, 4, 2, 1), Color(1.8, 1.5, 0.6))  # eye glow
+		img.fill_rect(Rect2i(20 + phase, 0, 1, 13), SHRD2)  # scythe haft
+		img.fill_rect(Rect2i(21 + phase, 0, 6, 2), BONE2)   # blade
+		img.set_pixel(26 + phase, 2, BONE2)
+		_outline(img, OUT)
+		if phase == 0:
+			tex_rider = ImageTexture.create_from_image(img)
+		else:
+			tex_rider_b = ImageTexture.create_from_image(img)
 
 func _setup_sfx() -> void:
 	for i in 10:
@@ -408,6 +420,17 @@ func _setup_sfx() -> void:
 	sfx_bank["hit"] = _synth(0.13, 22.0, 200.0, 0.5)
 	sfx_bank["bell"] = _synth(1.8, 1.2, 190.0, 0.92)
 	sfx_bank["glass"] = _synth(0.3, 16.0, 2400.0, 0.25)
+	sfx_bank["shing"] = _synth_mix(0.45, [[16.0, 1700.0, 0.85, 0.55, 0.0], [34.0, 0.0, 0.0, 0.4, 0.0], [9.0, 2500.0, 0.6, 0.2, 0.04]])
+	sfx_bank["whisper"] = _synth_mix(0.9, [[4.0, 0.0, 0.0, 0.32, 0.0], [6.0, 340.0, 0.3, 0.18, 0.15], [3.0, 170.0, 0.4, 0.14, 0.3]])
+	# the swarm hums — a living buzz that grows with the body
+	if character == "swarm":
+		buzz_player = AudioStreamPlayer.new()
+		var buzz := _synth_loop(2.0)
+		buzz_player.stream = buzz
+		buzz_player.volume_db = -60.0
+		buzz_player.pitch_scale = 2.6
+		add_child(buzz_player)
+		buzz_player.play()
 
 func _synth_mix(dur: float, layers: Array) -> AudioStreamWAV:
 	# layered one-shots: each layer = [decay, tone_hz, tone_mix, gain, delay]
@@ -1435,6 +1458,10 @@ func _process(delta: float) -> void:
 	for j in range(fi, fire_lights.size()):
 		fire_lights[j].energy = 0.0
 	flash_light.energy = maxf(0.0, flash_light.energy - 9.0 * delta)
+	# the swarm's hum swells with size and speed
+	if buzz_player != null:
+		buzz_player.volume_db = lerpf(buzz_player.volume_db,
+			-26.0 + growth * 8.0 + minf(6.0, vel.length() * 0.02), 2.0 * delta)
 	# screen ripple rolls outward
 	if shock_p < 1.0:
 		shock_p = minf(1.0, shock_p + delta * 1.8)
@@ -1620,6 +1647,7 @@ var feathers: Array = []         # {pos, vy, t_left}
 # sfx
 var sfx_players: Array = []
 var sfx_bank := {}
+var buzz_player: AudioStreamPlayer
 var serp_head: Texture2D
 var serp_body: Texture2D
 var serp_wing: Texture2D
@@ -1634,7 +1662,9 @@ var scythe_ang := 0.0
 var flood: Array = []            # water zones {x0, x1, t_left}
 var trail_cd := 0.0
 var tex_drowned: Texture2D
+var tex_drowned_b: Texture2D
 var tex_rider: Texture2D
+var tex_rider_b: Texture2D
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
@@ -2203,6 +2233,7 @@ func _drowned(delta: float) -> void:
 
 func _madden(u: Dictionary) -> void:
 	madden_count += 1
+	_sfx("whisper")
 	u.mad = true
 	u.mad_t = 12.0 + (8.0 if nodes.has("hollowing") else 0.0)
 	combo = minf(9.5, combo + 0.2)
@@ -2250,7 +2281,7 @@ func _rider(delta: float) -> void:
 		var reach: float = 52.0 * growth
 		scythe_ang = (aim - o).angle()
 		scythe_t = 0.18
-		_sfx("lash")
+		_sfx("shing")
 		shake = maxf(shake, 3.0)
 		for u in units:
 			if u.kind == "carcass":
@@ -4026,8 +4057,11 @@ func _draw_actors() -> void:
 				draw_colored_polygon(PackedVector2Array([p, p + to_swarm * 90.0 + to_swarm.orthogonal() * 22.0,
 					p + to_swarm * 90.0 - to_swarm.orthogonal() * 22.0]), Color(1.0, 1.0, 0.85, 0.05))
 			"soldier":
+				var sleg: float = sin(t * 10.0 + p.x * 0.7) * 1.6
 				draw_rect(Rect2(p.x - 1, p.y - 7, 3, 5), Color("#3a4432"))
 				draw_rect(Rect2(p.x - 1, p.y - 9, 3, 2), Color("#2c3428"))
+				draw_line(Vector2(p.x, p.y - 2), Vector2(p.x - sleg, p.y), Color("#2c3428"), 1)
+				draw_line(Vector2(p.x, p.y - 2), Vector2(p.x + sleg, p.y), Color("#2c3428"), 1)
 				draw_line(Vector2(p.x, p.y - 5), Vector2(p.x + signf(pos.x - p.x) * 5, p.y - 6), Color("#20261c"), 1)
 			"arty":
 				draw_rect(Rect2(p.x - 13, p.y - 7, 26, 6), Color("#3c4034"))
@@ -4172,6 +4206,14 @@ func _draw_keraunos() -> void:
 			draw_line(prev, npt, Color(1.6, 2.0, 2.6, a), 2.5)
 			draw_line(prev, npt, Color(0.7, 1.2, 2.2, a * 0.5), 5.0)
 			prev = npt
+	# the stormfront travels WITH him — his own weather
+	for i in 5:
+		var cp := pos + Vector2(sin(t * 0.3 + i * 2.3) * 60.0 + (i - 2) * 38.0, -95.0 - (i % 3) * 10.0)
+		draw_circle(cp, (20.0 + (i % 3) * 7.0) * growth, Color(0.05, 0.06, 0.1, 0.5))
+		draw_circle(cp + Vector2(9, 5), 14.0 * growth, Color(0.08, 0.09, 0.14, 0.45))
+		if randf() < 0.012:
+			draw_line(cp + Vector2(randf_range(-10, 10), 6), cp + Vector2(randf_range(-16, 16), 30.0 + randf() * 20.0),
+				Color(1.2, 1.8, 2.4, 0.55), 1.0)
 	# ===== the colossus: Ghidorah-scale storm hydra (1.5x transform) =====
 	draw_set_transform(pos * (1.0 - 1.5 * growth), 0.0, Vector2(1.5 * growth, 1.5 * growth))
 	var facing: float = signf(aim.x - pos.x)
@@ -4257,6 +4299,11 @@ func _draw_keraunos() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func _draw_tzitzi() -> void:
+	# molting feathers drift from the long body
+	if randf() < 0.18 and segs.size() > 4:
+		var sp: Vector2 = segs[randi() % segs.size()]
+		parts.append({"pos": sp, "vel": Vector2(randf_range(-8, 8), randf_range(6, 16)),
+			"life": randf_range(1.0, 2.2), "col": Color(1.6, 1.1, 0.3), "size": 1.5})
 	# crosshair
 	draw_circle(aim, 2.0, Color(1.8, 1.2, 0.4, 0.7))
 	draw_arc(aim, 5.0, 0, TAU, 12, Color(1.8, 1.2, 0.4, 0.4), 1.0)
@@ -4439,10 +4486,14 @@ func _draw_drowned() -> void:
 		parts.append({"pos": pos + Vector2(randf_range(-14, 14), randf_range(-24, -4)), "vel": Vector2(0, 30),
 			"life": 0.5, "col": Color(0.4, 0.8, 0.9, 0.6), "size": 1.2})
 	draw_set_transform(pos + Vector2(0, 2), 0.0, Vector2(1.4 * facing * growth, 1.4 * growth))
-	draw_texture(tex_drowned, Vector2(-18, -30), Color(1, 1, 1))
+	draw_texture(tex_drowned if int(t * 3.0) % 2 == 0 else tex_drowned_b, Vector2(-18, -30), Color(1, 1, 1))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# bob glow of the eye-lights
 	draw_circle(pos + Vector2(facing * 2.0, -16 + sin(t * 2.0) * 1.5), 6.0, Color(0.5, 1.2, 1.1, 0.10))
+	# the bay follows him — fish leap in his wake
+	if randf() < 0.06:
+		parts.append({"pos": pos + Vector2(randf_range(-60, 60), -2), "vel": Vector2(randf_range(-20, 20), randf_range(-95, -55)),
+			"life": 0.9, "col": Color(0.5, 0.95, 0.85), "size": 2.0})
 
 func _draw_rider() -> void:
 	draw_circle(aim, 2.0, Color(1.6, 1.5, 0.7, 0.7))
@@ -4472,7 +4523,8 @@ func _draw_rider() -> void:
 			"life": 1.4, "col": Color(0.55, 0.7, 0.3, 0.4), "size": 2.5, "fire": true, "smoke": true})
 	var gait: float = absf(sin(t * 6.0)) * 1.5 if absf(vel.x) > 10.0 else 0.0
 	draw_set_transform(pos + Vector2(0, -gait), 0.0, Vector2(1.3 * facing * growth, 1.3 * growth))
-	draw_texture(tex_rider, Vector2(-17, -28), Color(1, 1, 1))
+	var rframe: Texture2D = tex_rider_b if (absf(vel.x) > 10.0 and int(t * 9.0) % 2 == 1) else tex_rider
+	draw_texture(rframe, Vector2(-17, -28), Color(1, 1, 1))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func _draw_swarm() -> void:
@@ -4488,10 +4540,17 @@ func _draw_swarm() -> void:
 	for m in motes:
 		m.a += 0.025 * m.s
 		var wob: float = sin(t * 6.5 + m.o) * 3.0
-		var px: float = pos.x + cos(m.a) * radius * m.d * (1.0 + 0.3 * sin(t * 3.4 + m.o)) + wob
-		var py: float = pos.y + sin(m.a * 1.3) * radius * m.d * 1.4 + cos(t * 5.2 + m.o) * 2.5
+		# the cloud recoils and boils outward when struck
+		var scat: float = 1.0 + 0.3 * sin(t * 3.4 + m.o) + hit_flash * 0.9
+		var px: float = pos.x + cos(m.a) * radius * m.d * scat + wob
+		var py: float = pos.y + sin(m.a * 1.3) * radius * m.d * 1.4 * scat + cos(t * 5.2 + m.o) * 2.5
 		var stx: float = -sin(m.a) * (1.5 + m.s)
 		var sty: float = cos(m.a * 1.3) * 1.2
 		var bright: bool = hit_flash > 0.5 or fmod(m.o + t, 5.0) < 0.35
 		var mc: Color = Color(2.2, 1.4, 1.1) if bright else (Color(1.7, 0.35, 0.4) if m.d < 0.6 else Color("#701018"))
 		draw_line(Vector2(px, py), Vector2(px + stx, py + sty), mc, 1.0)
+		# near locusts show beating wings
+		if m.d < 0.75 and m.s > 1.6:
+			var wf: float = 2.0 if fmod(t * 16.0 + m.o, 2.0) < 1.0 else -1.0
+			draw_line(Vector2(px, py), Vector2(px - stx * 0.4, py - wf - 1.5), Color(1.3, 0.55, 0.5, 0.7), 0.8)
+			draw_line(Vector2(px + stx * 0.5, py), Vector2(px + stx * 0.9, py - wf - 1.2), Color(1.1, 0.45, 0.45, 0.5), 0.8)
