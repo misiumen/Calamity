@@ -3389,7 +3389,7 @@ class DraftUI extends Control:
 		var w := 140.0
 		var gap := 14.0
 		var total: float = n * w + (n - 1) * gap
-		var x0: float = 172.0 + (640.0 - 184.0 - total) * 0.5
+		var x0: float = (640.0 - total) * 0.5
 		return Rect2(x0 + i * (w + gap), 74.0 + (-8.0 if hover == i else 0.0), w, 218.0)
 	func _gui_input(e: InputEvent) -> void:
 		if not visible:
@@ -3412,9 +3412,9 @@ class DraftUI extends Control:
 		draw_string(f, Vector2(0, 36), m.draft_title, HORIZONTAL_ALIGNMENT_CENTER, 640, 17, Color(1.9, 0.5, 0.55))
 		draw_string(f, Vector2(0, 52), "what is shed does not return", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color("#8890b0"))
 		# ---- left: the god on its essence pedestal ----
-		var gp := Vector2(88, 178)
-		draw_arc(gp + Vector2(0, 60), 42.0, PI, TAU, 26, Color(1.6, 0.4, 0.4, 0.4 + 0.15 * sin(tt * 2.0)), 1.5)
-		draw_circle(gp + Vector2(0, 60), 42.0, Color(0.5, 0.1, 0.15, 0.14))
+		var gp := Vector2(46, 168)
+		draw_arc(gp + Vector2(0, 52), 36.0, PI, TAU, 26, Color(1.6, 0.4, 0.4, 0.4 + 0.15 * sin(tt * 2.0)), 1.5)
+		draw_circle(gp + Vector2(0, 52), 36.0, Color(0.5, 0.1, 0.15, 0.14))
 		for e2 in 7:
 			var ey: float = fmod(e2 * 19.7 + tt * 22.0, 78.0)
 			draw_rect(Rect2(gp.x - 26 + fmod(e2 * 31.3, 52.0), gp.y + 52 - ey, 1.5, 1.5),
@@ -3461,9 +3461,9 @@ class DraftUI extends Control:
 				draw_circle(gp + Vector2(-2, -20), 3.5, Color(0.88, 0.83, 0.66))
 				draw_circle(gp + Vector2(-1, -21), 0.9, Color(1.9, 1.6, 0.6))
 				draw_arc(gp + Vector2(2, -30), 12.0, -0.4, 1.5, 12, Color(0.97, 0.93, 0.78), 2.2)
-		draw_string(f, Vector2(8, 258), m.character.to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 160, 10, Color(1.7, 0.5, 0.5))
+		draw_string(f, Vector2(0, 244), m.character.to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 92, 10, Color(1.7, 0.5, 0.5))
 		var stage_s: String = ("stage %d" % (m.bio_stage + 1)) + ("" if m.branch == "" else " - " + m.branch.to_upper())
-		draw_string(f, Vector2(8, 270), stage_s, HORIZONTAL_ALIGNMENT_CENTER, 160, 7, Color("#8890b0"))
+		draw_string(f, Vector2(0, 256), stage_s, HORIZONTAL_ALIGNMENT_CENTER, 92, 7, Color("#8890b0"))
 		# ---- the cards ----
 		for i in m.draft_opts.size():
 			var d: Dictionary = m.draft_opts[i]

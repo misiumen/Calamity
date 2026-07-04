@@ -110,7 +110,7 @@ func _ready() -> void:
 		_relic_overlay()
 
 func _reachable(id: int) -> bool:
-	if id == Global.map_pos or id in Global.razed:
+	if id == Global.map_pos or id in Global.razed or id in Global.bypassed:
 		return false
 	var n: Dictionary = ns[id]
 	for l in n.get("links", []):
@@ -225,6 +225,11 @@ func _launch(n: Dictionary) -> void:
 	ev_extra = {}
 	if Global.act == 1:
 		Global.city = Global.province
+		# the fork is a choice — the other road closes behind you
+		if n.kind == "farms":
+			Global.bypassed.append(3)
+		elif n.kind == "mill":
+			Global.bypassed.append(2)
 	match n.kind:
 		"hamlet":
 			params.world_w = 2000.0 if Global.act == 2 else 1900.0
@@ -351,8 +356,11 @@ func _draw() -> void:
 				r = 7.0
 			_: col = Color(0.55, 0.4, 0.6)
 		var razed_n: bool = n.id in Global.razed
+		var passed: bool = n.id in Global.bypassed
 		if razed_n:
 			col = Color(0.35, 0.12, 0.1)
+		elif passed:
+			col = Color(0.2, 0.19, 0.24)
 		draw_circle(n.pos, r, col)
 		if n.id == Global.map_pos:
 			draw_arc(n.pos, r + 4.0 + sin(Time.get_ticks_msec() * 0.005) * 1.5, 0, TAU, 20, Color(1.8, 0.4, 0.4), 1.5)
@@ -362,7 +370,10 @@ func _draw() -> void:
 			draw_line(n.pos + Vector2(-4, -4), n.pos + Vector2(4, 4), Color(0.9, 0.3, 0.2), 1.5)
 			draw_line(n.pos + Vector2(-4, 4), n.pos + Vector2(4, -4), Color(0.9, 0.3, 0.2), 1.5)
 		draw_string(f, n.pos + Vector2(-70, -r - 5), n.name, HORIZONTAL_ALIGNMENT_CENTER, 140, 7,
-			Color(0.9, 0.85, 0.8, 0.85))
+			Color(0.9, 0.85, 0.8, 0.4) if passed else Color(0.9, 0.85, 0.8, 0.85))
+		if passed:
+			draw_string(f, n.pos + Vector2(-70, r + 12), "PASSED BY", HORIZONTAL_ALIGNMENT_CENTER, 140, 6,
+				Color(0.55, 0.5, 0.6, 0.7))
 		# reachable nodes show what the war will ask of you — and what the road carries
 		if _reachable(n.id) and n.kind in ["hamlet", "farms", "mill", "town", "city", "capital", "provcity"]:
 			draw_string(f, n.pos + Vector2(-70, r + 12), _obj_for(n).to_upper(),

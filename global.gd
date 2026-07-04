@@ -20,6 +20,7 @@ var c_nodes := {}
 var c_bio_stage := 0
 var c_essence := 0.0
 var node_fates := {}             # act 2: node_id -> fate tag, rolled once per crusade
+var bypassed: Array = []         # fork roads not taken — closed forever
 var alert_discount := 0          # quiet roads earned — lowers effective World Alert
 # --- THE ROAR: how loudly you have fed; the void hears round numbers ---
 var roar := 0.0
@@ -145,6 +146,7 @@ func reset_crusade(chr: String) -> void:
 	c_bio_stage = 0
 	c_essence = 0.0
 	node_fates = {}
+	bypassed = []
 	alert_discount = 0
 	roar = 0.0
 	heralds_slain = []
@@ -168,7 +170,7 @@ func save_crusade() -> void:
 		f.store_string(JSON.stringify({"character": character, "act": act, "node_i": node_i,
 			"map_pos": map_pos, "razed": razed, "tribute": tribute, "relics": relics,
 			"c_branch": c_branch, "c_nodes": c_nodes, "c_bio_stage": c_bio_stage, "c_essence": c_essence,
-			"node_fates": node_fates, "alert_discount": alert_discount, "province": province,
+			"node_fates": node_fates, "alert_discount": alert_discount, "province": province, "bypassed": bypassed,
 			"roar": roar, "herald_queue": herald_queue, "heralds_slain": heralds_slain,
 			"grafts": grafts, "act3_ready": act3_ready}))
 
@@ -191,6 +193,7 @@ func load_crusade() -> bool:
 	c_bio_stage = int(d.get("c_bio_stage", 0))
 	c_essence = float(d.get("c_essence", 0.0))
 	node_fates = d.get("node_fates", {})
+	bypassed = d.get("bypassed", [])
 	province = d.get("province", PROVINCE_OF.get(character, "kowloon"))
 	alert_discount = int(d.get("alert_discount", 0))
 	roar = float(d.get("roar", 0.0))

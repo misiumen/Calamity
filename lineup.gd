@@ -262,6 +262,114 @@ func _draw() -> void:
 			_hamlet_sheet()
 		"draftui":
 			_draftui_mock()
+		"menu_root":
+			_menu_root_mock()
+		"menu_char":
+			_menu_char_mock()
+
+func _frame(r: Rect2, bord: Color, fill: Color) -> void:
+	draw_rect(r, fill)
+	for edge in [Rect2(r.position, Vector2(r.size.x, 2)), Rect2(r.position + Vector2(0, r.size.y - 2), Vector2(r.size.x, 2)),
+			Rect2(r.position, Vector2(2, r.size.y)), Rect2(r.position + Vector2(r.size.x - 2, 0), Vector2(2, r.size.y))]:
+		draw_rect(edge, bord)
+	for c in [Vector2.ZERO, Vector2(r.size.x - 6, 0), Vector2(0, r.size.y - 6), Vector2(r.size.x - 6, r.size.y - 6)]:
+		draw_rect(Rect2(r.position + c, Vector2(6, 6)), bord)
+
+func _menu_bg() -> void:
+	draw_rect(Rect2(0, 0, 640, 360), Color("#0a0712"))
+	# burning skyline silhouette at the foot of the menu
+	for i in 16:
+		var bw := 24.0 + fmod(i * 37.7, 40.0)
+		var bh := 30.0 + fmod(i * 53.3, 70.0)
+		var bx := i * 41.0
+		draw_rect(Rect2(bx, 360 - bh, bw, bh), Color("#151020"))
+		if i % 3 == 0:
+			draw_circle(Vector2(bx + bw * 0.5, 360 - bh - 2), 5.0, Color(1.8, 0.7, 0.2, 0.35))
+			draw_circle(Vector2(bx + bw * 0.5, 360 - bh - 2), 2.0, Color(2.2, 1.2, 0.4, 0.7))
+	draw_rect(Rect2(0, 300, 640, 60), Color(0.04, 0.02, 0.07, 0.55))
+	# drifting embers
+	for e in 14:
+		draw_rect(Rect2(fmod(e * 97.3, 640.0), 40.0 + fmod(e * 53.7, 260.0), 1.5, 1.5), Color(1.9, 0.7, 0.3, 0.5))
+
+func _menu_root_mock() -> void:
+	_menu_bg()
+	draw_string(ui_font, Vector2(0, 92), "C A L A M I T Y", HORIZONTAL_ALIGNMENT_CENTER, 640, 34, Color(1.9, 0.45, 0.5))
+	draw_string(ui_font, Vector2(0, 110), "you are the apocalypse", HORIZONTAL_ALIGNMENT_CENTER, 640, 9, Color("#8d86a8"))
+	var rows := [["NEW CRUSADE", "prologue, three acts, a continent to raze", true],
+		["CONTINUE CRUSADE", "act II — the crusade, 4 provinces burnt", false],
+		["SKIRMISH", "one god, one city, no stakes", false]]
+	for i in rows.size():
+		var r := Rect2(170, 138 + i * 62, 300, 50)
+		var hov: bool = rows[i][2]
+		if hov:
+			r.position.y -= 3
+			draw_rect(Rect2(r.position - Vector2(4, 4), r.size + Vector2(8, 8)), Color(1.9, 0.5, 0.5, 0.10))
+		_frame(r, Color(1.9, 0.6, 0.6) if hov else Color(0.4, 0.32, 0.45), Color("#151020"))
+		draw_string(ui_font, Vector2(r.position.x, r.position.y + 20), rows[i][0], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 13,
+			Color(1.8, 0.55, 0.55) if hov else Color(0.95, 0.9, 1.0))
+		draw_string(ui_font, Vector2(r.position.x + 8, r.position.y + 38), rows[i][1], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16, 7, Color("#8d86a8"))
+
+func _menu_char_mock() -> void:
+	_menu_bg()
+	draw_string(ui_font, Vector2(0, 40), "CHOOSE YOUR CALAMITY", HORIZONTAL_ALIGNMENT_CENTER, 640, 15, Color(1.9, 0.45, 0.5))
+	draw_string(ui_font, Vector2(0, 56), "[esc - back]", HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color("#8d86a8"))
+	var gods := [["THE SWARM", Color(1.8, 0.4, 0.45), "plague of locusts", "tendrils - grabs - evolve", false],
+		["KERAUNOS", Color(0.5, 1.5, 2.0), "colossal storm hydra", "banked bolts - TEMPEST", false],
+		["TZITZIMITL", Color(1.9, 1.2, 0.3), "eclipse serpent", "lance dives - eat the sun", true],
+		["THE DROWNED", Color(0.4, 1.6, 1.5), "tide priest", "madden - flood - fishmen", false],
+		["PALE RIDER", Color(1.7, 1.5, 0.7), "pestilence", "fog infects - dead rise", false]]
+	for i in gods.size():
+		var r := Rect2(14 + i * 124, 78 + (-6 if gods[i][4] else 0), 116, 236)
+		var col: Color = gods[i][1]
+		if gods[i][4]:
+			draw_rect(Rect2(r.position - Vector2(4, 4), r.size + Vector2(8, 8)), Color(col.r, col.g, col.b, 0.12))
+		_frame(r, col if gods[i][4] else Color(0.4, 0.32, 0.45), Color("#151020"))
+		# emblem well
+		var gp := r.position + Vector2(58, 74)
+		draw_circle(gp, 34.0, Color("#100c1a"))
+		draw_arc(gp, 34.0, 0, TAU, 24, Color(col.r, col.g, col.b, 0.4), 1.0)
+		match i:
+			0:
+				draw_circle(gp, 15.0, Color("#2a0614"))
+				for mm in 16:
+					var mp := gp + Vector2(cos(mm * 2.4), sin(mm * 3.1)) * (8.0 + fmod(mm * 5.3, 12.0))
+					draw_line(mp, mp + Vector2(2.5, 1), Color(1.7, 0.4, 0.4), 1.0)
+				draw_circle(gp + Vector2(7, -4), 3.0, Color(1.8, 1.1, 0.3))
+			1:
+				for h2 in 3:
+					var hh := gp + Vector2((h2 - 1) * 11.0, -14.0)
+					draw_line(gp + Vector2((h2 - 1) * 4.0, 4.0), hh, Color(0.10, 0.11, 0.18), 3.0)
+					draw_circle(hh, 3.0, Color(0.16, 0.18, 0.28))
+					draw_circle(hh + Vector2(2, 0), 1.1, Color(1.2, 2.0, 2.6))
+				draw_circle(gp + Vector2(0, 8), 10.0, Color(0.10, 0.11, 0.18))
+			2:
+				var prev := gp + Vector2(-20, 10)
+				for s2 in 9:
+					var f4 := s2 / 8.0
+					var npt := gp + Vector2(-20 + f4 * 40.0, 10.0 - sin(f4 * PI) * 22.0)
+					draw_line(prev, npt, Color(0.10, 0.48, 0.47), 4.5 * (1.0 - absf(f4 - 0.5)))
+					prev = npt
+				draw_circle(prev, 3.5, Color(0.23, 0.72, 0.66))
+				draw_circle(prev + Vector2(2, -1), 1.2, Color(2.4, 1.5, 0.3))
+			3:
+				draw_colored_polygon(PackedVector2Array([gp + Vector2(-11, 24), gp + Vector2(-9, -6),
+					gp + Vector2(-3, -19), gp + Vector2(4, -18), gp + Vector2(9, -4), gp + Vector2(11, 24)]),
+					Color(0.02, 0.08, 0.10))
+				draw_circle(gp + Vector2(-3, -13), 1.4, Color(1.3, 2.4, 2.2))
+				draw_circle(gp + Vector2(3, -13), 1.4, Color(1.3, 2.4, 2.2))
+			4:
+				draw_colored_polygon(PackedVector2Array([gp + Vector2(13, 22), gp + Vector2(14, -2),
+					gp + Vector2(5, -17), gp + Vector2(-3, -21), gp + Vector2(-13, -11), gp + Vector2(-19, 7),
+					gp + Vector2(-14, 22)]), Color(0.075, 0.06, 0.09))
+				draw_circle(gp + Vector2(-2, -15), 2.8, Color(0.88, 0.83, 0.66))
+				draw_arc(gp + Vector2(2, -24), 10.0, -0.4, 1.5, 10, Color(0.97, 0.93, 0.78), 2.0)
+		draw_string(ui_font, Vector2(r.position.x, r.position.y + 134), gods[i][0], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 9, col)
+		draw_string(ui_font, Vector2(r.position.x + 6, r.position.y + 156), gods[i][2], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 12, 7, Color("#b8b0c8"))
+		draw_string(ui_font, Vector2(r.position.x + 6, r.position.y + 172), gods[i][3], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 12, 6, Color("#8d86a8"))
+		# crusade record chip
+		draw_rect(Rect2(r.position.x + 8, r.position.y + 196, r.size.x - 16, 14), Color("#100c1a"))
+		draw_string(ui_font, Vector2(r.position.x, r.position.y + 206), "best: act II", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 6, Color(0.6, 0.55, 0.7))
+		draw_string(ui_font, Vector2(r.position.x, r.position.y + 228), "[%d]" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 7, Color(0.6, 0.55, 0.7))
 
 func _draftui_mock() -> void:
 	# static mock of the proposed evolution screen — THE MOLT
