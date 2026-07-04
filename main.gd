@@ -133,6 +133,8 @@ var flash_t := 0.0               # white screen flash on big events
 var impact_frames := 0           # hard white frames on the biggest hits
 var milestone_i := 0             # devour milestones fired
 var over_t := 0.0                # time since the end screen fell
+var end_label := ""              # crusade end-card label (drawn, not a Button)
+var end_win := false
 var fire_lights: Array = []      # pooled PointLight2D for blazes
 var flash_light: PointLight2D
 var flak_cd := 3.0
@@ -730,12 +732,14 @@ func _prologue_check() -> void:
 			_caption("IT HAS A NAME NOW.\nAnd the world has a problem.", true)
 
 var caption_queue: Array = []
+var caption_final := false
 
 func _caption_next() -> void:
 	if not caption_queue.is_empty():
 		_caption(caption_queue.pop_front(), false)
 
 func _caption(text: String, final: bool) -> void:
+	caption_final = final
 	caption_layer = CanvasLayer.new()
 	caption_layer.layer = 96
 	add_child(caption_layer)
@@ -748,22 +752,22 @@ func _caption(text: String, final: bool) -> void:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD
 	l.text = text
-	var btn := Button.new()
-	btn.text = "SO IT BEGINS" if final else "..."
-	btn.position = Vector2(250, 240)
-	btn.size = Vector2(140, 28)
-	btn.add_theme_font_override("font", ui_font)
-	btn.add_theme_font_size_override("font_size", 12)
-	btn.pressed.connect(func():
-		caption_layer.queue_free()
-		caption_layer = null
-		if final:
-			Global.node_i = 0
-			Global.save_crusade()
-			Global.launch_act1()
-		elif not caption_queue.is_empty():
-			call_deferred("_caption_next"))
-	caption_layer.add_child(btn)
+	var hint := _label(caption_layer, Vector2(0, 250), 8, Color(0.6, 0.55, 0.7))
+	hint.size = Vector2(640, 14)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.text = "SO IT BEGINS — click" if final else "click to continue"
+
+func _caption_advance() -> void:
+	if caption_layer == null:
+		return
+	caption_layer.queue_free()
+	caption_layer = null
+	if caption_final:
+		Global.node_i = 0
+		Global.save_crusade()
+		Global.launch_act1()
+	elif not caption_queue.is_empty():
+		call_deferred("_caption_next")
 
 func _apply_branch_stats() -> void:
 	# re-apply node effects that normally happen at pick time
@@ -3591,6 +3595,7 @@ class DraftUI extends Control:
 		mouse_filter = Control.MOUSE_FILTER_STOP
 		visible = false
 	func _process(_d: float) -> void:
+		visible = m.draft_open or (m.over and m.end_label != "")
 		if visible:
 			queue_redraw()
 	func _card_rect(i: int, n: int) -> Rect2:
@@ -3601,6 +3606,11 @@ class DraftUI extends Control:
 		return Rect2(x0 + i * (w + gap), 74.0 + (-8.0 if hover == i else 0.0), w, 218.0)
 	func _gui_input(e: InputEvent) -> void:
 		if not visible:
+			return
+		if not m.draft_open:
+			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT 					and Rect2(220, 222, 200, 40).has_point(e.position):
+				m._end_advance()
+				accept_event()
 			return
 		if e is InputEventMouseMotion:
 			hover = -1
@@ -3616,6 +3626,20 @@ class DraftUI extends Control:
 	func _draw() -> void:
 		var f: FontFile = m.ui_font
 		var tt: float = Time.get_ticks_msec() * 0.001
+		if not m.draft_open:
+			# the crusade end-card, in the card language
+			var armed: bool = m.over_t >= 0.8
+			var r0 := Rect2(220, 222, 200, 40)
+			var bord0: Color = Color(1.9, 0.6, 0.6) if armed else Color(0.35, 0.3, 0.4)
+			draw_rect(r0, Color("#151020"))
+			for edge0 in [Rect2(r0.position, Vector2(r0.size.x, 2)), Rect2(r0.position + Vector2(0, r0.size.y - 2), Vector2(r0.size.x, 2)),
+					Rect2(r0.position, Vector2(2, r0.size.y)), Rect2(r0.position + Vector2(r0.size.x - 2, 0), Vector2(2, r0.size.y))]:
+				draw_rect(edge0, bord0)
+			for c0 in [Vector2.ZERO, Vector2(r0.size.x - 6, 0), Vector2(0, r0.size.y - 6), Vector2(r0.size.x - 6, r0.size.y - 6)]:
+				draw_rect(Rect2(r0.position + c0, Vector2(6, 6)), bord0)
+			draw_string(f, Vector2(r0.position.x, r0.position.y + 25), m.end_label, HORIZONTAL_ALIGNMENT_CENTER, r0.size.x, 12,
+				Color(1.8, 0.55, 0.55) if armed else Color(0.6, 0.55, 0.65))
+			return
 		draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.0, 0.05, 0.93))
 		draw_string(f, Vector2(0, 36), m.draft_title, HORIZONTAL_ALIGNMENT_CENTER, 640, 17, Color(1.9, 0.5, 0.55))
 		draw_string(f, Vector2(0, 52), "what is shed does not return", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color("#8890b0"))
@@ -4222,31 +4246,24 @@ func _finish(win: bool, et: Dictionary) -> void:
 		_crusade_button("RISE AGAIN", win)
 
 func _crusade_button(label: String, win: bool) -> void:
-	var layer := CanvasLayer.new()
-	layer.layer = 95
-	add_child(layer)
-	var btn := Button.new()
-	btn.text = label
-	btn.position = Vector2(230, 228)
-	btn.size = Vector2(180, 30)
-	btn.add_theme_font_override("font", ui_font)
-	btn.add_theme_font_size_override("font_size", 13)
-	btn.disabled = true
-	get_tree().create_timer(0.8).timeout.connect(func():
-		if is_instance_valid(btn):
-			btn.disabled = false)
-	btn.pressed.connect(func():
-		Engine.time_scale = 1.0
-		if not win:
-			Global.goto("res://main.tscn")
-		elif Global.act == 1:
-			Global.launch_act1()
-		elif Global.node_params.get("capital", false):
-			Global.goto("res://menu.tscn")
-		else:
-			Global.node_params = {"offer_relic": true}
-			Global.goto("res://map.tscn"))
-	layer.add_child(btn)
+	end_label = label
+	end_win = win
+
+func _end_advance() -> void:
+	if end_label == "" or over_t < 0.8:
+		return
+	Engine.time_scale = 1.0
+	var lbl := end_label
+	end_label = ""
+	if not end_win:
+		Global.goto("res://main.tscn")
+	elif Global.act == 1:
+		Global.launch_act1()
+	elif Global.node_params.get("capital", false):
+		Global.goto("res://menu.tscn")
+	else:
+		Global.node_params = {"offer_relic": true}
+		Global.goto("res://map.tscn")
 
 func _end(m: String, s: String) -> void:
 	over = true
@@ -4258,6 +4275,12 @@ func _end(m: String, s: String) -> void:
 		% [buildings_razed, people_killed, unit_kills, int(run_time) / 60, int(run_time) % 60]
 
 func _input(e: InputEvent) -> void:
+	if caption_layer != null and ((e is InputEventMouseButton and e.pressed) 			or (e is InputEventKey and e.pressed and e.physical_keycode in [KEY_SPACE, KEY_ENTER])):
+		_caption_advance()
+		return
+	if over and end_label != "" and e is InputEventKey and e.pressed and e.physical_keycode == KEY_ENTER:
+		_end_advance()
+		return
 	if draft_open and e is InputEventKey and e.pressed:
 		var ki: int = e.physical_keycode - KEY_1
 		if ki >= 0 and ki < draft_opts.size():
@@ -4518,7 +4541,7 @@ func _draw() -> void:
 		draw_circle(o.pos, 1.6, oc)
 	for p in pops:
 		var a2: float = clampf(p.life, 0.0, 1.0)
-		draw_string(ui_font, p.pos, p.txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
+		draw_string(ui_font, p.pos + Vector2(-160, 0), p.txt, HORIZONTAL_ALIGNMENT_CENTER, 320, 8,
 			Color(p.col.r * 1.4, p.col.g * 1.4, p.col.b * 1.4, a2))
 	# drifting ash on the wind
 	var ash_c: Color = city_def.lamp
@@ -4670,28 +4693,84 @@ func _draw_backdrop(left: float, right: float, cx: float) -> void:
 			var hx0: float = world_w * 0.85 - cx * 0.06
 			draw_texture_rect(tex_sky_a, Rect2(hx0 - cw2 * 0.5, -60.0 - ch2, cw2, ch2), false, Color(0.32, 0.26, 0.4, 0.9))
 			draw_rect(Rect2(hx0 - cw2 * 0.5, -60.0 - ch2, cw2, ch2), Color(0.1, 0.07, 0.18, 0.35))
-		for lay in [[0.12, 78.0, Color(0.17, 0.14, 0.25)], [0.3, 44.0, Color(0.11, 0.09, 0.17)]]:
-			var f2: float = lay[0]
-			var hgt: float = lay[1]
-			var col: Color = lay[2]
+		# region palette: each province's countryside is its own
+		var rcols: Array = {
+			"thornspire": [Color(0.13, 0.13, 0.24), Color(0.08, 0.08, 0.16)],
+			"teotl": [Color(0.10, 0.17, 0.12), Color(0.06, 0.12, 0.08)],
+			"maren": [Color(0.14, 0.15, 0.20), Color(0.10, 0.11, 0.15)],
+			"ashport": [Color(0.16, 0.12, 0.10), Color(0.11, 0.08, 0.07)],
+		}.get(Global.city, [Color(0.15, 0.13, 0.20), Color(0.10, 0.09, 0.15)])
+		var ridge_h: Array = [78.0, 44.0]
+		if Global.city == "maren":
+			# the sea lies flat behind the dunes
+			draw_rect(Rect2(left, -66.0, right - left, 66.0), Color(0.08, 0.16, 0.20, 0.8))
+			draw_rect(Rect2(left, -66.0, right - left, 2.0), Color(0.3, 0.5, 0.55, 0.6))
+			for bt in 3:
+				var bx2: float = left + fposmod(bt * 300.0 + cx * 0.06, right - left)
+				draw_rect(Rect2(bx2, -70.0, 10.0, 3.0), Color(0.05, 0.07, 0.1))
+				draw_line(Vector2(bx2 + 5, -70.0), Vector2(bx2 + 5, -78.0), Color(0.05, 0.07, 0.1), 1.0)
+			ridge_h = [26.0, 16.0]
+		for li2 in 2:
+			var f2: float = [0.12, 0.3][li2]
+			var hgt: float = ridge_h[li2]
+			var col: Color = rcols[li2]
+			var jag: float = 0.6 if Global.city == "ashport" else 0.18
 			var pts := PackedVector2Array([Vector2(left, 0)])
 			var x2: float = left
 			while x2 <= right + 16.0:
-				var s: float = x2 - cx * f2
-				pts.append(Vector2(x2, -hgt - sin(s * 0.011) * hgt * 0.35 - sin(s * 0.031 + 2.0) * hgt * 0.18))
+				var sxx: float = x2 - cx * f2
+				pts.append(Vector2(x2, -hgt - sin(sxx * 0.011) * hgt * 0.35 - sin(sxx * 0.031 + 2.0) * hgt * jag))
 				x2 += 16.0
 			pts.append(Vector2(right + 16.0, 0))
 			draw_colored_polygon(pts, col)
-		# pine line seated on the near ridge
+		# region furniture seated on the near ridge
 		var f3 := 0.3
 		var s2: float = floor((left - cx * f3) / 26.0) * 26.0
 		while s2 < right - cx * f3 + 26.0:
 			var px2: float = s2 + cx * f3
-			var by: float = -44.0 - sin(s2 * 0.011) * 15.4 - sin(s2 * 0.031 + 2.0) * 7.9
-			var th: float = 8.0 + fmod(absf(sin(s2 * 0.717)) * 13.7, 6.0)
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(px2 - 4.5, by), Vector2(px2, by - th), Vector2(px2 + 4.5, by)]),
-				Color(0.08, 0.10, 0.13))
+			var by: float = -ridge_h[1] - sin(s2 * 0.011) * ridge_h[1] * 0.35 - sin(s2 * 0.031 + 2.0) * ridge_h[1] * 0.18
+			var hsh: float = fmod(absf(sin(s2 * 0.717)) * 13.7, 6.0)
+			match Global.city:
+				"thornspire":
+					# black pines + the odd wayside spire
+					draw_colored_polygon(PackedVector2Array([
+						Vector2(px2 - 4.5, by), Vector2(px2, by - 9.0 - hsh), Vector2(px2 + 4.5, by)]),
+						Color(0.07, 0.08, 0.13))
+					if int(s2 / 26.0) % 9 == 0:
+						draw_rect(Rect2(px2 - 1.0, by - 20.0, 2.0, 20.0), Color(0.10, 0.10, 0.17))
+						draw_colored_polygon(PackedVector2Array([Vector2(px2 - 2.5, by - 20.0),
+							Vector2(px2, by - 27.0), Vector2(px2 + 2.5, by - 20.0)]), Color(0.10, 0.10, 0.17))
+				"teotl":
+					# canopy mounds, a distant stepped shrine
+					draw_circle(Vector2(px2, by - 3.0), 7.0 + hsh * 0.6, Color(0.07, 0.13, 0.09))
+					if int(s2 / 26.0) % 11 == 0:
+						for stp in 3:
+							draw_rect(Rect2(px2 - 6.0 + stp * 2.0, by - 6.0 - stp * 4.0, 12.0 - stp * 4.0, 4.0),
+								Color(0.12, 0.14, 0.11))
+				"maren":
+					# dune grass tufts + nets on poles
+					draw_line(Vector2(px2, by), Vector2(px2 - 2.0, by - 5.0 - hsh * 0.4), Color(0.18, 0.20, 0.16), 1.0)
+					draw_line(Vector2(px2, by), Vector2(px2 + 2.0, by - 4.0), Color(0.18, 0.20, 0.16), 1.0)
+					if int(s2 / 26.0) % 8 == 0:
+						draw_rect(Rect2(px2, by - 12.0, 1.5, 12.0), Color(0.12, 0.10, 0.09))
+				"ashport":
+					# slag stacks + mine headframes
+					if int(s2 / 26.0) % 3 == 0:
+						draw_rect(Rect2(px2 - 2.0, by - 8.0 - hsh, 4.0, 8.0 + hsh), Color(0.10, 0.08, 0.07))
+					if int(s2 / 26.0) % 10 == 0:
+						draw_line(Vector2(px2 - 5.0, by), Vector2(px2, by - 16.0), Color(0.12, 0.09, 0.08), 1.5)
+						draw_line(Vector2(px2 + 5.0, by), Vector2(px2, by - 16.0), Color(0.12, 0.09, 0.08), 1.5)
+						draw_circle(Vector2(px2, by - 16.0), 2.0, Color(0.12, 0.09, 0.08))
+				_:
+					# kowloon fringe: pylons marching to the city
+					if int(s2 / 26.0) % 6 == 0:
+						draw_line(Vector2(px2 - 4.0, by), Vector2(px2, by - 18.0), Color(0.11, 0.10, 0.15), 1.2)
+						draw_line(Vector2(px2 + 4.0, by), Vector2(px2, by - 18.0), Color(0.11, 0.10, 0.15), 1.2)
+						draw_line(Vector2(px2 - 5.0, by - 12.0), Vector2(px2 + 5.0, by - 12.0), Color(0.11, 0.10, 0.15), 1.0)
+					else:
+						draw_colored_polygon(PackedVector2Array([
+							Vector2(px2 - 3.5, by), Vector2(px2, by - 5.0 - hsh * 0.5), Vector2(px2 + 3.5, by)]),
+							Color(0.09, 0.09, 0.13))
 			s2 += 26.0
 		return
 	# city glow band on the horizon (blooms slightly)

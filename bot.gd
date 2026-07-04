@@ -62,6 +62,9 @@ func _process(delta: float) -> void:
 	if t_total > duration:
 		_finish("timeout")
 		return
+	# never act mid-fade — scenes are lame ducks during transitions
+	if Global.fade_a > 0.05 or Global.fade_path != "":
+		return
 	var sc := get_tree().current_scene
 	if sc == null:
 		return
@@ -75,10 +78,11 @@ func _process(delta: float) -> void:
 
 func _drive_map(map: Node) -> void:
 	# overlays first: relic picks and travel events are just buttons
-	if map.get("picking_relic") or map.get("in_event"):
-		var btn := _find_button(map)
-		if btn != null:
-			btn.emit_signal("pressed")
+	if map.get("picking_relic"):
+		map._relic_pick(0)
+		return
+	if map.get("in_event"):
+		map._ev_pick(randi() % 2)
 		return
 	if Engine.get_frames_drawn() % 40 != 0:
 		return
@@ -111,9 +115,7 @@ func _drive_battle(m: Node, delta: float) -> void:
 			_mouse(MOUSE_BUTTON_LEFT, false)
 			lmb_down = false
 		if Engine.get_frames_drawn() % 20 == 0:
-			var cb := _find_button(m.caption_layer)
-			if cb != null:
-				cb.emit_signal("pressed")
+			m._caption_advance()
 		return
 	# evolution drafts — take the first offer (THE MOLT has no buttons)
 	if m.get("draft_open"):
@@ -126,14 +128,14 @@ func _drive_battle(m: Node, delta: float) -> void:
 			ended_seen = true
 			_log("end: %s | %s" % [m.hud.msg.text, m.hud.stats.text])
 			report["last_end"] = str(m.hud.msg.text)
-			var eb := _find_button(m)
-			if eb != null:
-				if lmb_down:
-					_mouse(MOUSE_BUTTON_LEFT, false)
-					lmb_down = false
-				eb.emit_signal("pressed")
-			else:
+			if lmb_down:
+				_mouse(MOUSE_BUTTON_LEFT, false)
+				lmb_down = false
+			if m.end_label == "":
 				_finish("done")
+		elif m.end_label != "":
+			m.over_t = 1.0
+			m._end_advance()
 		return
 	ended_seen = false
 	# ---- softlock watchdog: some number must keep moving ----

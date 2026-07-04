@@ -75,9 +75,13 @@ const EVENTS := [
 
 var ui_font: FontFile
 var picking_relic := false
+var relic_opts: Array = []
 var in_event := false
+var ev_cur := {}
+var ev_node := {}
 var march = null                 # marching animation -> interstitial -> launch
 var ev_extra := {}               # event outcome folded into the next launch
+var ov_hover := -1
 
 func _ready() -> void:
 	Global.music("map")
@@ -120,7 +124,24 @@ func _reachable(id: int) -> bool:
 	return false
 
 func _unhandled_input(e: InputEvent) -> void:
-	if picking_relic or in_event or march != null:
+	if march != null:
+		return
+	if picking_relic or in_event:
+		if e is InputEventMouseMotion:
+			ov_hover = -1
+			var oc := _overlay_cards()
+			for i in oc.size():
+				if oc[i].has_point(get_global_mouse_position()):
+					ov_hover = i
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			var oc2 := _overlay_cards()
+			for i in oc2.size():
+				if oc2[i].has_point(get_global_mouse_position()):
+					if picking_relic:
+						_relic_pick(i)
+					else:
+						_ev_pick(i)
+					return
 		return
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
 		Global.goto("res://menu.tscn")
@@ -145,46 +166,9 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _event_overlay(n: Dictionary) -> void:
 	in_event = true
-	var ev: Dictionary = EVENTS[randi() % EVENTS.size()]
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	var dim := ColorRect.new()
-	dim.size = Vector2(640, 360)
-	dim.color = Color(0.02, 0.0, 0.05, 0.85)
-	layer.add_child(dim)
-	var title := Label.new()
-	title.text = "ON THE ROAD TO " + n.name
-	title.position = Vector2(0, 66)
-	title.size = Vector2(640, 20)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_override("font", ui_font)
-	title.add_theme_font_size_override("font_size", 12)
-	title.add_theme_color_override("font_color", Color(1.8, 0.5, 0.5))
-	layer.add_child(title)
-	var body := Label.new()
-	body.text = ev.t
-	body.position = Vector2(70, 100)
-	body.size = Vector2(500, 60)
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD
-	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	body.add_theme_font_override("font", ui_font)
-	body.add_theme_font_size_override("font_size", 10)
-	body.add_theme_color_override("font_color", Color(0.9, 0.87, 0.9))
-	layer.add_child(body)
-	for oi in 2:
-		var opt: Array = ev.a if oi == 0 else ev.b
-		var btn := Button.new()
-		btn.text = opt[0]
-		btn.position = Vector2(150, 180 + oi * 44)
-		btn.size = Vector2(340, 28)
-		btn.add_theme_font_override("font", ui_font)
-		btn.add_theme_font_size_override("font_size", 11)
-		btn.pressed.connect(func():
-			_apply_ev(opt[1])
-			in_event = false
-			layer.queue_free()
-			_begin_march(n))
-		layer.add_child(btn)
+	ev_cur = EVENTS[randi() % EVENTS.size()]
+	ev_node = n
+	ov_hover = -1
 
 func _apply_ev(fx: Dictionary) -> void:
 	Global.c_essence += fx.get("essence", 0.0)
@@ -260,46 +244,37 @@ func _launch(n: Dictionary) -> void:
 	Global.goto("res://main.tscn")
 
 func _relic_overlay() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	var dim := ColorRect.new()
-	dim.size = Vector2(640, 360)
-	dim.color = Color(0.02, 0.0, 0.05, 0.8)
-	layer.add_child(dim)
-	var title := Label.new()
-	title.text = "THE RUIN LEAVES A GIFT — take one"
-	title.position = Vector2(0, 70)
-	title.size = Vector2(640, 24)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_override("font", ui_font)
-	title.add_theme_font_size_override("font_size", 15)
-	title.add_theme_color_override("font_color", Color(1.8, 0.5, 0.5))
-	layer.add_child(title)
 	var pool := RELICS.filter(func(r): return not r.id in Global.relics)
 	pool.shuffle()
-	for i in mini(3, pool.size()):
-		var rl: Dictionary = pool[i]
-		var btn := Button.new()
-		btn.text = rl.name
-		btn.position = Vector2(190, 120 + i * 58)
-		btn.size = Vector2(260, 26)
-		btn.add_theme_font_override("font", ui_font)
-		btn.add_theme_font_size_override("font_size", 12)
-		btn.pressed.connect(func():
-			Global.relics.append(rl.id)
-			Global.save_crusade()
-			picking_relic = false
-			layer.queue_free())
-		layer.add_child(btn)
-		var d := Label.new()
-		d.text = rl.desc
-		d.position = Vector2(0, 147 + i * 58)
-		d.size = Vector2(640, 14)
-		d.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		d.add_theme_font_override("font", ui_font)
-		d.add_theme_font_size_override("font_size", 8)
-		d.add_theme_color_override("font_color", Color("#9ab0d0"))
-		layer.add_child(d)
+	relic_opts = pool.slice(0, 3)
+	ov_hover = -1
+
+func _relic_pick(i: int) -> void:
+	if i < 0 or i >= relic_opts.size():
+		return
+	Global.relics.append(relic_opts[i].id)
+	Global.save_crusade()
+	picking_relic = false
+	relic_opts = []
+
+func _ev_pick(i: int) -> void:
+	var opt: Array = ev_cur.a if i == 0 else ev_cur.b
+	_apply_ev(opt[1])
+	in_event = false
+	var n: Dictionary = ev_node
+	ev_cur = {}
+	ev_node = {}
+	_begin_march(n)
+
+func _overlay_cards() -> Array:
+	var out: Array = []
+	if picking_relic:
+		for i in relic_opts.size():
+			out.append(Rect2(112 + i * 146, 110, 134, 150))
+	elif in_event:
+		for i in 2:
+			out.append(Rect2(150, 180 + i * 52, 340, 44))
+	return out
 
 func _begin_march(n: Dictionary) -> void:
 	march = {"n": n, "t": 0.0, "from": ns[Global.map_pos].pos}
@@ -324,6 +299,11 @@ func _draw() -> void:
 		draw_circle(Vector2(hx, hy), 8.0 + fmod(float(i), 4.0) * 4.0, Color(0.1, 0.09, 0.15, 0.5))
 	var title_s: String = "ACT II — THE CRUSADE" if Global.act == 2 else 		"ACT I — THE RISE OF " + str(PROVINCE_NAMES.get(Global.province, ["", "", "", "", "?"])[4])
 	draw_string(f, Vector2(0, 34), title_s, HORIZONTAL_ALIGNMENT_CENTER, 640, 18, Color(1.8, 0.5, 0.5))
+	if Global.act == 1:
+		var gm: float = [0.7, 0.8, 0.88, 0.94, 1.0][mini(4, Global.razed.size())]
+		var body: int = int(minf(1.75, gm * (1.0 + minf(0.75, Global.c_essence / 900.0))) * 100.0)
+		draw_string(f, Vector2(0, 64), "THE BODY  %d%%   ·   ESSENCE CARRIED  %d   ·   THE ROAR  %d" 			% [body, int(Global.c_essence), int(Global.roar)],
+			HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color(1.2, 0.9, 1.3, 0.85))
 	if Global.headline != "":
 		draw_string(f, Vector2(0, 344), "THE PROVINCIAL HERALD:  " + Global.headline,
 			HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(1.5, 1.3, 0.8, 0.9))
@@ -393,6 +373,58 @@ func _draw() -> void:
 				draw_string(f, n.pos + Vector2(-70, r + 20), FATE_NAMES.get(fate2, ""),
 					HORIZONTAL_ALIGNMENT_CENTER, 140, 6, Color(1.2, 0.7, 1.5, 0.85))
 	draw_string(f, Vector2(0, 334), "choose where the ruin goes next", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color(0.7, 0.65, 0.7, 0.6))
+	# overlays: relic gifts and road events, drawn in the card language
+	if picking_relic or in_event:
+		draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.0, 0.05, 0.86))
+		var oc3 := _overlay_cards()
+		if picking_relic:
+			draw_string(f, Vector2(0, 78), "THE RUIN LEAVES A GIFT — TAKE ONE", HORIZONTAL_ALIGNMENT_CENTER, 640, 13, Color(1.9, 0.5, 0.55))
+			for i in relic_opts.size():
+				var rl: Dictionary = relic_opts[i]
+				var r: Rect2 = oc3[i]
+				var hov: bool = ov_hover == i
+				if hov:
+					r.position.y -= 4.0
+					draw_rect(Rect2(r.position - Vector2(3, 3), r.size + Vector2(6, 6)), Color(1.9, 0.5, 0.5, 0.10))
+				_card_frame(r, Color(1.9, 0.6, 0.6) if hov else Color(0.4, 0.32, 0.45))
+				draw_string(f, Vector2(r.position.x, r.position.y + 26), rl.name, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 9, Color(1.7, 1.4, 0.7))
+				var words: PackedStringArray = str(rl.desc).split(" ")
+				var line := ""
+				var ly: float = r.position.y + 52.0
+				for w2 in words:
+					if line.length() + w2.length() > 19:
+						draw_string(f, Vector2(r.position.x + 8, ly), line, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16, 6, Color("#9ab0d0"))
+						ly += 10.0
+						line = w2
+					else:
+						line += (" " if line != "" else "") + w2
+				if line != "":
+					draw_string(f, Vector2(r.position.x + 8, ly), line, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16, 6, Color("#9ab0d0"))
+		else:
+			draw_string(f, Vector2(0, 88), "ON THE ROAD TO " + str(ev_node.get("name", "")), HORIZONTAL_ALIGNMENT_CENTER, 640, 12, Color(1.9, 0.5, 0.55))
+			var bw: PackedStringArray = str(ev_cur.get("t", "")).split(" ")
+			var bl := ""
+			var by: float = 120.0
+			for w3 in bw:
+				if bl.length() + w3.length() > 52:
+					draw_string(f, Vector2(70, by), bl, HORIZONTAL_ALIGNMENT_CENTER, 500, 9, Color(0.9, 0.87, 0.9))
+					by += 13.0
+					bl = w3
+				else:
+					bl += (" " if bl != "" else "") + w3
+			if bl != "":
+				draw_string(f, Vector2(70, by), bl, HORIZONTAL_ALIGNMENT_CENTER, 500, 9, Color(0.9, 0.87, 0.9))
+			for i in 2:
+				var opt: Array = ev_cur.a if i == 0 else ev_cur.b
+				var r2: Rect2 = oc3[i]
+				var hov2: bool = ov_hover == i
+				if hov2:
+					r2.position.y -= 3.0
+					draw_rect(Rect2(r2.position - Vector2(3, 3), r2.size + Vector2(6, 6)), Color(1.9, 0.5, 0.5, 0.10))
+				_card_frame(r2, Color(1.9, 0.6, 0.6) if hov2 else Color(0.4, 0.32, 0.45))
+				draw_string(f, Vector2(r2.position.x, r2.position.y + 27), opt[0], HORIZONTAL_ALIGNMENT_CENTER, r2.size.x, 10,
+					Color(1.8, 0.55, 0.55) if hov2 else Color(0.95, 0.9, 1.0))
+		return
 	# the march: your ruin travels the road, then the night card falls
 	if march != null:
 		var f2: float = clampf(march.t / 1.1, 0.0, 1.0)
@@ -410,3 +442,11 @@ func _draw() -> void:
 			var flv: String = Global.headline if Global.headline != "" else "The roads empty ahead of you."
 			draw_string(f, Vector2(0, 206), flv.to_lower(), HORIZONTAL_ALIGNMENT_CENTER, 640, 7,
 				Color(0.6, 0.56, 0.7, ia))
+
+func _card_frame(r: Rect2, bord: Color) -> void:
+	draw_rect(r, Color("#151020"))
+	for edge in [Rect2(r.position, Vector2(r.size.x, 2)), Rect2(r.position + Vector2(0, r.size.y - 2), Vector2(r.size.x, 2)),
+			Rect2(r.position, Vector2(2, r.size.y)), Rect2(r.position + Vector2(r.size.x - 2, 0), Vector2(2, r.size.y))]:
+		draw_rect(edge, bord)
+	for c in [Vector2.ZERO, Vector2(r.size.x - 6, 0), Vector2(0, r.size.y - 6), Vector2(r.size.x - 6, r.size.y - 6)]:
+		draw_rect(Rect2(r.position + c, Vector2(6, 6)), bord)
