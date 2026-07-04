@@ -800,6 +800,12 @@ func _apply_branch_stats() -> void:
 		dmg_taken_mult *= 0.8
 		essence_mult *= 1.25
 
+func _mouse_world() -> Vector2:
+	# the autoplayer steers the cursor when CAL_BOT is set
+	if Bot.active:
+		return Bot.aim_world
+	return get_global_mouse_position()
+
 func _flash(p: Vector2, e: float) -> void:
 	flash_light.position = p
 	flash_light.energy = maxf(flash_light.energy, e)
@@ -1838,7 +1844,7 @@ func _tendrils(delta: float) -> void:
 	bite_cd -= delta
 	rmb_cd -= delta
 	lash.t_left = maxf(0.0, lash.t_left - delta)
-	var mouse := get_global_mouse_position()
+	var mouse := _mouse_world()
 	var to_m := mouse - pos
 	aim_clamped = to_m.length() > tendril_range
 	aim = pos + to_m.limit_length(tendril_range)
@@ -1990,7 +1996,7 @@ func _keraunos(delta: float) -> void:
 	bolt_charges = minf(bolt_max, bolt_charges + delta / 1.0)
 	rmb_cd -= delta
 	stun_t = maxf(0.0, stun_t - delta)
-	aim = get_global_mouse_position()
+	aim = _mouse_world()
 	aim_clamped = false
 	feeding = false
 	for b2 in bolts:
@@ -2191,7 +2197,7 @@ func _skyfall(p: Vector2) -> void:
 
 # ================= TZITZIMITL =================
 func _tzitzi_move(delta: float) -> void:
-	var mouse := get_global_mouse_position()
+	var mouse := _mouse_world()
 	aim = mouse
 	aim_clamped = false
 	feeding = false
@@ -2346,7 +2352,7 @@ func _ground_move(delta: float, top_speed: float) -> void:
 		pos.y = -12.0
 		vel.y = 0.0
 	pos.x = clamp(pos.x, 40, world_w - 40)
-	aim = get_global_mouse_position()
+	aim = _mouse_world()
 	aim_clamped = false
 	feeding = false
 

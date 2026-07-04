@@ -25,7 +25,7 @@ var herald_queue: Array = []     # 3 of 10, rolled per crusade
 var heralds_slain: Array = []
 var grafts: Array = []           # stolen powers, kept forever
 var act3_ready := false
-const ROAR_GATES := [250.0, 550.0, 900.0]
+const ROAR_GATES := [1500.0, 3200.0, 5200.0]
 # params handed to the next run
 var node_params := {}
 
