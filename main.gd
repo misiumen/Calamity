@@ -421,6 +421,14 @@ func _setup_sfx() -> void:
 	sfx_bank["bell"] = _synth(1.8, 1.2, 190.0, 0.92)
 	sfx_bank["glass"] = _synth(0.3, 16.0, 2400.0, 0.25)
 	sfx_bank["shing"] = _synth_mix(0.45, [[16.0, 1700.0, 0.85, 0.55, 0.0], [34.0, 0.0, 0.0, 0.4, 0.0], [9.0, 2500.0, 0.6, 0.2, 0.04]])
+	sfx_bank["siren"] = _synth_mix(2.4, [[1.0, 640.0, 0.9, 0.3, 0.0], [1.0, 672.0, 0.9, 0.3, 0.0]])
+	sfx_bank["gull"] = _synth_mix(0.7, [[6.0, 1040.0, 0.92, 0.28, 0.0], [8.0, 780.0, 0.85, 0.18, 0.22]])
+	sfx_bank["chirp"] = _synth_mix(0.25, [[26.0, 2300.0, 0.95, 0.22, 0.0], [30.0, 2600.0, 0.9, 0.15, 0.09]])
+	sfx_bank["clank"] = _synth_mix(0.6, [[13.0, 260.0, 0.7, 0.3, 0.0], [22.0, 410.0, 0.6, 0.2, 0.12]])
+	sfx_bank["horn"] = _synth_mix(1.1, [[2.6, 186.0, 0.85, 0.26, 0.0], [2.6, 140.0, 0.8, 0.18, 0.05]])
+	amb_player = AudioStreamPlayer.new()
+	amb_player.volume_db = -20.0
+	add_child(amb_player)
 	sfx_bank["whisper"] = _synth_mix(0.9, [[4.0, 0.0, 0.0, 0.32, 0.0], [6.0, 340.0, 0.3, 0.18, 0.15], [3.0, 170.0, 0.4, 0.14, 0.3]])
 	# the swarm hums — a living buzz that grows with the body
 	if character == "swarm":
@@ -765,9 +773,10 @@ func _setup_env() -> void:
 	flash_light.energy = 0.0
 	flash_light.texture_scale = 6.0
 	add_child(flash_light)
-	# wind ambience — a low loop, synthesized
+	# wind ambience — a low loop, synthesized; every city breathes differently
 	var wind := AudioStreamPlayer.new()
 	wind.stream = _synth_loop(3.0)
+	wind.pitch_scale = {"maren": 0.7, "thornspire": 0.55, "teotl": 1.3, "ashport": 0.8}.get(Global.city, 1.0)
 	wind.volume_db = -22.0
 	wind.autoplay = true
 	add_child(wind)
@@ -1383,7 +1392,18 @@ func _process(delta: float) -> void:
 			if absf(bus.x - cam.position.x) > 900.0:
 				bus.dead = true
 		buses = buses.filter(func(bus): return not bus.get("dead", false))
+		# a news chopper circles the story of the century
+		news_cd -= delta
+		if news_cd <= 0.0 and tier >= 1:
+			news_cd = randf_range(35.0, 60.0)
+			var nside: float = -1.0 if randf() < 0.5 else 1.0
+			units.append({"kind": "news", "pos": Vector2(cam.position.x - nside * 420.0, -175.0),
+				"cd": 999.0, "hp": 1, "side": nside})
 		tier = mini(5, int(threat / 17.0))
+		if tier != prev_tier_s:
+			if tier > prev_tier_s:
+				_sfx("siren" if tier >= 3 else "bell")
+			prev_tier_s = tier
 		_check_end()
 	for b in buildings:
 		if b.holes.size() > 40:
@@ -1462,6 +1482,16 @@ func _process(delta: float) -> void:
 	if buzz_player != null:
 		buzz_player.volume_db = lerpf(buzz_player.volume_db,
 			-26.0 + growth * 8.0 + minf(6.0, vel.length() * 0.02), 2.0 * delta)
+	# the city's own voice, now and then
+	amb_cd -= delta
+	if amb_cd <= 0.0:
+		amb_cd = randf_range(7.0, 16.0)
+		var amb_s: String = {"maren": "gull", "teotl": "chirp", "ashport": "clank",
+			"thornspire": "bell"}.get(Global.city, "horn")
+		if sfx_bank.has(amb_s):
+			amb_player.stream = sfx_bank[amb_s]
+			amb_player.pitch_scale = randf_range(0.9, 1.1)
+			amb_player.play()
 	# screen ripple rolls outward
 	if shock_p < 1.0:
 		shock_p = minf(1.0, shock_p + delta * 1.8)
@@ -1648,6 +1678,10 @@ var feathers: Array = []         # {pos, vy, t_left}
 var sfx_players: Array = []
 var sfx_bank := {}
 var buzz_player: AudioStreamPlayer
+var amb_player: AudioStreamPlayer
+var amb_cd := 6.0
+var news_cd := 25.0
+var prev_tier_s := 0
 var serp_head: Texture2D
 var serp_body: Texture2D
 var serp_wing: Texture2D
@@ -2756,6 +2790,12 @@ func _collapse(b: Dictionary) -> void:
 			shake = 22.0
 	if b.get("special", "") != "":
 		specials_down += 1
+	# ruptured gas main — the street answers in fire
+	if node_kind in ["city", "capital"] and b.get("special", "") == "" and randf() < 0.15:
+		var gdir: float = 1.0 if randf() < 0.5 else -1.0
+		for gi in 3:
+			aftershock_q.append({"p": Vector2(cx + gdir * (30.0 + gi * 34.0), -6.0), "t_left": 0.25 + gi * 0.22})
+		_pop(Vector2(cx, -18), "GAS MAIN RUPTURES", Color(2.2, 1.2, 0.3))
 	_sfx("crumble")
 
 func _hit_props(p: Vector2, r: float) -> void:
@@ -3040,6 +3080,10 @@ func _kill_unit(u: Dictionary) -> void:
 		"heli": base = 600
 		"arty": base = 900
 		"jet": base = 1200
+		"news":
+			base = 800
+			threat = minf(100.0, threat + 8.0)
+			_pop(u.pos + Vector2(0, -14), "LIVE FEED SEVERED — THE WORLD SAW", Color(2.0, 0.5, 0.4))
 		"soldier": base = 120
 		"carcass": base = 150
 		_: base = 300
@@ -3175,6 +3219,13 @@ func _army(delta: float) -> void:
 			"heli":
 				u.pos.x += signf(dx) * 38.0 * delta
 				u.pos.y += sin(t * 2.0) * 6.0 * delta
+			"news":
+				# holds station off your shoulder, broadcasting terror
+				var want_x: float = pos.x + u.get("side", 1.0) * 130.0
+				u.pos.x = move_toward(u.pos.x, want_x, 44.0 * delta)
+				u.pos.y = -170.0 + sin(t * 1.4) * 10.0
+				if absf(dx) < 280.0:
+					_feed("fear", 0.5 * delta)
 			"jet":
 				u.pos.x += u.vx * delta
 				if absf(dx) < 90.0 and u.bombs > 0:
@@ -3186,7 +3237,7 @@ func _army(delta: float) -> void:
 		u.cd -= delta
 		u.mf = maxf(0.0, u.get("mf", 0.0) - delta)
 		var fire_range: float = 700.0 if u.kind == "arty" else 420.0
-		if u.cd <= 0.0 and absf(dx) < fire_range and u.kind != "jet":
+		if u.cd <= 0.0 and absf(dx) < fire_range and not u.kind in ["jet", "news"]:
 			u.cd = maxf(0.4, (randf_range(1.1, 2.0) - tier * 0.12) / defense)
 			u.mf = 0.07
 			var origin: Vector2 = u.pos + Vector2(0, -18 if u.kind != "heli" else 4)
@@ -3664,6 +3715,48 @@ func _draw() -> void:
 			am.p.x = randf_range(0, 680)
 		var wp := Vector2(left + fposmod(am.p.x, right - left), am.p.y)
 		draw_rect(Rect2(wp.x, wp.y, 1.2, 1.2), Color(ash_c.r * 0.5, ash_c.g * 0.45, ash_c.b * 0.4, 0.25 * am.s))
+	# weather — each city has its own sky-mood
+	match Global.city:
+		"maren":
+			for i in 46:
+				var si: float = _hash(float(i))
+				var rx: float = left + fposmod(si * 1997.0 + t * 30.0, right - left)
+				var ry: float = fposmod(si * 700.0 + t * (280.0 + si * 120.0), 370.0) - 360.0
+				draw_line(Vector2(rx, ry), Vector2(rx - 3.0, ry + 9.0), Color(0.55, 0.7, 0.9, 0.30), 1.0)
+			if randf() < 0.5:
+				draw_arc(Vector2(left + randf() * (right - left), -1.0), randf_range(1.0, 2.5),
+					PI, TAU, 6, Color(0.6, 0.8, 0.95, 0.4), 1.0)
+		"thornspire":
+			for i in 3:
+				var fx2: float = left + fposmod(i * 420.0 + t * (4.0 + i * 2.0), right - left + 300.0) - 150.0
+				var fy2: float = -22.0 - i * 26.0
+				draw_circle(Vector2(fx2, fy2), 90.0 + i * 30.0, Color(0.5, 0.6, 0.8, 0.05))
+				draw_circle(Vector2(fx2 + 70.0, fy2 + 8.0), 60.0, Color(0.5, 0.6, 0.8, 0.04))
+		"teotl":
+			for i in 14:
+				if fmod(t * 0.7 + _hash(float(i)) * 9.0, 3.0) < 1.2:
+					var gx: float = left + fposmod(_hash(i + 31.0) * 2000.0 + sin(t * 0.5 + i) * 30.0, right - left)
+					var gy: float = -8.0 - _hash(i + 17.0) * 130.0 + sin(t * 1.1 + i * 2.0) * 9.0
+					draw_circle(Vector2(gx, gy), 1.0, Color(0.9, 1.8, 0.5, 0.8))
+					draw_circle(Vector2(gx, gy), 2.6, Color(0.6, 1.4, 0.3, 0.2))
+	# foreground silhouettes — closer than the war
+	var fgo: float = cx * 0.22
+	if not node_kind in ["hamlet", "town", "prologue"]:
+		var s3: float = floor((left + fgo) / 210.0) * 210.0
+		while s3 < right + fgo + 210.0:
+			var px3: float = s3 - fgo
+			draw_rect(Rect2(px3, -74.0, 2.5, 74.0), Color(0.02, 0.01, 0.04, 0.6))
+			draw_rect(Rect2(px3 - 5.0, -74.0, 13.0, 2.0), Color(0.02, 0.01, 0.04, 0.6))
+			var nx: float = px3 + 210.0
+			var mid := Vector2((px3 + nx) * 0.5, -63.0)
+			draw_line(Vector2(px3, -72.0), mid, Color(0.02, 0.01, 0.04, 0.5), 1.2)
+			draw_line(mid, Vector2(nx, -72.0), Color(0.02, 0.01, 0.04, 0.5), 1.2)
+			s3 += 210.0
+	else:
+		var s4: float = floor((left + fgo) / 34.0) * 34.0
+		while s4 < right + fgo + 34.0:
+			draw_rect(Rect2(s4 - fgo, -12.0, 1.5, 12.0), Color(0.02, 0.01, 0.04, 0.5))
+			s4 += 34.0
 	# atmosphere: ground haze + bottom vignette
 	draw_rect(Rect2(left, -30, right - left, 34), Color(0.3, 0.12, 0.3, 0.08))
 	draw_rect(Rect2(left, 14, right - left, 400), Color(0.01, 0.0, 0.03, 0.55))
@@ -4056,6 +4149,15 @@ func _draw_actors() -> void:
 				var to_swarm := (pos - p).normalized()
 				draw_colored_polygon(PackedVector2Array([p, p + to_swarm * 90.0 + to_swarm.orthogonal() * 22.0,
 					p + to_swarm * 90.0 - to_swarm.orthogonal() * 22.0]), Color(1.0, 1.0, 0.85, 0.05))
+			"news":
+				draw_rect(Rect2(p.x - 8, p.y - 3, 16, 6), Color("#c8ccd4"))
+				draw_rect(Rect2(p.x + (8 if pos.x < p.x else -14), p.y - 1, 6, 2), Color("#c8ccd4"))
+				draw_rect(Rect2(p.x - 4, p.y - 2, 8, 3), Color(1.8, 0.3, 0.3))
+				var nrot: float = sin(t * 40.0) * 12.0
+				draw_line(p + Vector2(-nrot, -5), p + Vector2(nrot, -5), Color(0.85, 0.88, 0.9, 0.6), 1)
+				# camera lens glint toward the story
+				var lens := (pos - p).normalized()
+				draw_circle(p + lens * 9.0, 1.2, Color(1.6, 1.6, 2.2, 0.7 + 0.3 * sin(t * 6.0)))
 			"soldier":
 				var sleg: float = sin(t * 10.0 + p.x * 0.7) * 1.6
 				draw_rect(Rect2(p.x - 1, p.y - 7, 3, 5), Color("#3a4432"))
