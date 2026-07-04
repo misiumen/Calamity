@@ -19,6 +19,13 @@ var c_bio_stage := 0
 var c_essence := 0.0
 var node_fates := {}             # act 2: node_id -> fate tag, rolled once per crusade
 var alert_discount := 0          # quiet roads earned — lowers effective World Alert
+# --- THE ROAR: how loudly you have fed; the void hears round numbers ---
+var roar := 0.0
+var herald_queue: Array = []     # 3 of 10, rolled per crusade
+var heralds_slain: Array = []
+var grafts: Array = []           # stolen powers, kept forever
+var act3_ready := false
+const ROAR_GATES := [250.0, 550.0, 900.0]
 # params handed to the next run
 var node_params := {}
 
@@ -131,6 +138,14 @@ func reset_crusade(chr: String) -> void:
 	c_essence = 0.0
 	node_fates = {}
 	alert_discount = 0
+	roar = 0.0
+	heralds_slain = []
+	grafts = []
+	act3_ready = false
+	var hpool := ["grazer", "stalker", "hollowking", "gatecrash", "echo",
+		"seraph", "tide", "rustsaint", "veil", "firstborn"]
+	hpool.shuffle()
+	herald_queue = hpool.slice(0, 3)
 	save_crusade()
 
 func launch_act1() -> void:
@@ -150,7 +165,9 @@ func save_crusade() -> void:
 		f.store_string(JSON.stringify({"character": character, "act": act, "node_i": node_i,
 			"map_pos": map_pos, "razed": razed, "tribute": tribute, "relics": relics,
 			"c_branch": c_branch, "c_nodes": c_nodes, "c_bio_stage": c_bio_stage, "c_essence": c_essence,
-			"node_fates": node_fates, "alert_discount": alert_discount}))
+			"node_fates": node_fates, "alert_discount": alert_discount,
+			"roar": roar, "herald_queue": herald_queue, "heralds_slain": heralds_slain,
+			"grafts": grafts, "act3_ready": act3_ready}))
 
 func load_crusade() -> bool:
 	if not FileAccess.file_exists(SAVE_PATH):
@@ -172,5 +189,10 @@ func load_crusade() -> bool:
 	c_essence = float(d.get("c_essence", 0.0))
 	node_fates = d.get("node_fates", {})
 	alert_discount = int(d.get("alert_discount", 0))
+	roar = float(d.get("roar", 0.0))
+	herald_queue = d.get("herald_queue", [])
+	heralds_slain = d.get("heralds_slain", [])
+	grafts = d.get("grafts", [])
+	act3_ready = d.get("act3_ready", false)
 	mode = "crusade"
 	return true

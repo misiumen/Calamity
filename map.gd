@@ -262,8 +262,20 @@ func _draw() -> void:
 		var hy := 70.0 + fmod(sin(i * 71.3) * 517.0, 1.0) * 260.0
 		draw_circle(Vector2(hx, hy), 8.0 + fmod(float(i), 4.0) * 4.0, Color(0.1, 0.09, 0.15, 0.5))
 	draw_string(f, Vector2(320, 34), "ACT II — THE CRUSADE", HORIZONTAL_ALIGNMENT_CENTER, -1, 18, Color(1.8, 0.5, 0.5))
-	draw_string(f, Vector2(320, 52), "WORLD ALERT %d   ·   TRIBUTE %d   ·   ESC — retreat" % [Global.razed.size(), Global.tribute],
+	draw_string(f, Vector2(320, 52), "WORLD ALERT %d   ·   TRIBUTE %d   ·   ESC — retreat" % [maxi(0, Global.razed.size() - Global.alert_discount), Global.tribute],
 		HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color("#9ab0d0"))
+	# THE ROAR — the louder you feed, the farther you are heard
+	var slain: int = Global.heralds_slain.size()
+	if slain < 3 and not Global.herald_queue.is_empty():
+		var gate: float = Global.ROAR_GATES[mini(slain, 2)]
+		var heard: bool = Global.roar >= gate
+		draw_string(f, Vector2(320, 64), "THE ROAR  %d / %d%s" % [int(Global.roar), int(gate),
+			"    —    SOMETHING HAS HEARD YOU" if heard else ""],
+			HORIZONTAL_ALIGNMENT_CENTER, -1, 8,
+			Color(2.0, 0.5, 1.2) if heard else Color(1.2, 0.7, 1.3, 0.8))
+	elif slain >= 3:
+		draw_string(f, Vector2(320, 64), "THREE HERALDS DEVOURED — THE STARS ARE LISTENING",
+			HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(2.0, 1.4, 2.2))
 	# roads
 	for n in NODES:
 		for l in n.get("links", []):

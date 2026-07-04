@@ -187,8 +187,11 @@ func _feed(kind: String, amt: float) -> void:
 	bio += gain
 	meter = minf(100.0, meter + gain * 0.55)
 	essence_eaten += gain
+	# DREAD MANTLE graft — fear knits the body
+	if kind == "fear" and "dreadmantle" in Global.grafts:
+		hp = minf(100.0, hp + gain * 0.25)
 	# growth: the more you consume of YOUR hunger, the bigger you get
-	growth = minf(1.75, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
+	growth = minf(growth_cap, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 
 var _shot_frames := 0
 
@@ -571,6 +574,18 @@ func _apply_campaign() -> void:
 	for i in int(p.get("allies_bonus", 0)):
 		allies.append({"kind": "cultist", "pos": Vector2(pos.x + 30.0 + i * 16.0, -4),
 			"hp": 3, "cd": 0.0, "life": 1e9})
+	# THE ROAR has been heard — something is coming to this battle
+	growth_cap = 1.75 + 0.35 * Global.heralds_slain.size()
+	if Global.act == 2 and node_kind != "prologue" and Global.heralds_slain.size() < Global.herald_queue.size() \
+			and Global.roar >= Global.ROAR_GATES[Global.heralds_slain.size()]:
+		herald_due = Global.herald_queue[Global.heralds_slain.size()]
+		herald_timer = 40.0
+	# stolen powers persist
+	for g in Global.grafts:
+		match g:
+			"oldcrown":
+				growth_cap += 0.15
+				essence_mult *= 1.15
 	if is_capital:
 		city_def = city_def.duplicate()
 		city_def.defense *= 1.4
@@ -611,7 +626,7 @@ func _apply_campaign() -> void:
 			"warfeast": heal_mult = 2.0
 			"longshadow": growth_mult += 0.1
 			"carrionwind": tribute_mult = 1.3
-	growth = minf(1.75, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
+	growth = minf(growth_cap, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 	# small settlements: no citadel, gentler mixes
 	essence_start = essence_eaten
 	if objective == "decapitation":
@@ -622,6 +637,30 @@ func _apply_campaign() -> void:
 		city_def.mix = {"house": 0.55, "shop": 0.3, "church": 0.08, "school": 0.07} if node_kind == "town" \
 			else {"house": 0.75, "shop": 0.25}
 		city_def.spawn_mult *= 0.7 if node_kind == "town" else 0.45
+
+const HERALD_DEFS := {
+	# ai: eat | hunt | cast | spawn | leech — the verb each outsider breaks the game with
+	"grazer": {"name": "THE GRAZER", "hp": 200, "ai": "eat", "scale": 2.2, "col": Color(0.55, 0.5, 0.3),
+		"graft": "gravitymaw", "gname": "GRAVITY MAW", "gdesc": "every collapse hurls shrapnel at your enemies"},
+	"stalker": {"name": "THE STALKER", "hp": 160, "ai": "hunt", "scale": 1.6, "col": Color(0.25, 0.2, 0.4),
+		"spd": 260.0, "graft": "predatorshift", "gname": "PREDATOR SHIFT", "gdesc": "being struck quickens you"},
+	"hollowking": {"name": "THE HOLLOW KING", "hp": 220, "ai": "cast", "scale": 2.4, "col": Color(0.45, 0.3, 0.2),
+		"from_below": true, "graft": "faultline", "gname": "FAULTLINE", "gdesc": "your razings crack the earth beneath the army"},
+	"gatecrash": {"name": "THE GATECRASH", "hp": 170, "ai": "spawn", "scale": 1.8, "col": Color(0.6, 0.25, 0.7),
+		"teleports": true, "graft": "riftstep", "gname": "RIFT STEP", "gdesc": "mortal wounds tear you elsewhere instead"},
+	"echo": {"name": "THE ECHO", "hp": 190, "ai": "hunt", "scale": 1.0, "col": Color(0.8, 0.3, 0.35),
+		"spd": 200.0, "mirror": true, "graft": "paradox", "gname": "PARADOX", "gdesc": "at death's edge, your echo fights beside you"},
+	"seraph": {"name": "THE SERAPH ASCENDANT", "hp": 180, "ai": "cast", "scale": 1.9, "col": Color(1.6, 1.5, 1.0),
+		"flies": true, "graft": "haloofruin", "gname": "HALO OF RUIN", "gdesc": "a stolen smite falls on the thickest column"},
+	"tide": {"name": "THE TIDE OF TEETH", "hp": 210, "ai": "spawn", "scale": 2.0, "col": Color(0.5, 0.15, 0.2),
+		"graft": "spawnbrood", "gname": "SPAWN BROOD", "gdesc": "your kills birth broodlings that fight for you"},
+	"rustsaint": {"name": "THE RUST SAINT", "hp": 240, "ai": "eat", "scale": 2.1, "col": Color(0.5, 0.35, 0.2),
+		"armors": true, "graft": "assimilate", "gname": "ASSIMILATE", "gdesc": "every razing knits your body back together"},
+	"veil": {"name": "THE MOURNING VEIL", "hp": 150, "ai": "leech", "scale": 1.7, "col": Color(0.4, 0.45, 0.6),
+		"graft": "dreadmantle", "gname": "DREAD MANTLE", "gdesc": "the fear you sow mends your wounds"},
+	"firstborn": {"name": "THE FIRSTBORN CALAMITY", "hp": 300, "ai": "hunt", "scale": 3.0, "col": Color(0.2, 0.16, 0.2),
+		"spd": 120.0, "slam": true, "graft": "oldcrown", "gname": "OLD CROWN", "gdesc": "the oldest hunger: bigger cap, richer feeding"},
+}
 
 const PROLOGUE_DEFS := {
 	"swarm": {"city": "ashport", "beats": [
@@ -704,7 +743,7 @@ func _prologue_check() -> void:
 	if progress >= beat.n:
 		prol_i += 1
 		growth_mult = minf(1.0, growth_mult + 0.18)
-		growth = minf(1.75, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
+		growth = minf(growth_cap, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 		_sfx("pick")
 		if prol_i < prol_beats.size():
 			_caption(prol_beats[prol_i].cap, false)
@@ -1251,6 +1290,9 @@ func _process(delta: float) -> void:
 	t += delta
 	if OS.get_environment("CAL_SHOT") != "":
 		_shot_frames += 1
+		if OS.get_environment("CAL_TEST").begins_with("herald:") and _shot_frames == 60:
+			if not herald_alive:
+				_spawn_herald(OS.get_environment("CAL_TEST").get_slice(":", 1))
 		if OS.get_environment("CAL_TEST") == "topple" and _shot_frames == 85:
 			for b in buildings:
 				if not b.dead and b.h > b.w and absf(b.x - pos.x) < 320.0 \
@@ -1429,6 +1471,11 @@ func _process(delta: float) -> void:
 			if absf(bus.x - cam.position.x) > 900.0:
 				bus.dead = true
 		buses = buses.filter(func(bus): return not bus.get("dead", false))
+		# the void's answer arrives mid-war
+		if herald_due != "" and not herald_alive:
+			herald_timer -= delta
+			if herald_timer <= 0.0:
+				_spawn_herald(herald_due)
 		# a news chopper circles the story of the century
 		news_cd -= delta
 		if news_cd <= 0.0 and tier >= 1:
@@ -1530,6 +1577,44 @@ func _process(delta: float) -> void:
 			amb_player.stream = sfx_bank[amb_s]
 			amb_player.pitch_scale = randf_range(0.9, 1.1)
 			amb_player.play()
+	# grafts — the stolen powers act on their own
+	shift_t = maxf(0.0, shift_t - delta)
+	if hp < prev_hp - 0.5:
+		if "predatorshift" in Global.grafts:
+			shift_t = 1.5
+		if "riftstep" in Global.grafts and hp < 30.0 and t > rift_cd:
+			rift_cd = t + 20.0
+			pos = Vector2(clampf(aim.x, 60.0, world_w - 60.0), minf(aim.y, -20.0))
+			_boom(pos, 16, Color(1.4, 0.5, 1.8), 100.0)
+			_pop(pos + Vector2(0, -20), "RIFT STEP", Color(1.6, 0.8, 1.8))
+	prev_hp = hp
+	if "paradox" in Global.grafts and not paradox_used and hp < 30.0 and hp > 0.0:
+		paradox_used = true
+		allies.append({"kind": "echoself", "pos": Vector2(pos.x - 30.0, -4), "hp": 12, "cd": 0.0, "life": 15.0})
+		_pop(pos + Vector2(0, -34), "YOUR ECHO STEPS OUT OF TIME", Color(1.8, 0.6, 0.7))
+	if "haloofruin" in Global.grafts and not over:
+		halo_cd -= delta
+		if halo_cd <= 0.0:
+			halo_cd = 25.0
+			var best = null
+			var bn := -1
+			for u in units:
+				if u.get("dead", false) or u.kind in ["jet", "news", "herald", "carcass"]:
+					continue
+				var cnt := 0
+				for u2 in units:
+					if absf(u2.pos.x - u.pos.x) < 90.0:
+						cnt += 1
+				if cnt > bn:
+					bn = cnt
+					best = u
+			if best != null and bn >= 2:
+				var cp2: Vector2 = best.pos
+				_shockwave(cp2 + Vector2(0, -6), 36.0)
+				_flash(cp2, 3.0)
+				parts.append({"pos": Vector2(cp2.x, -50), "vel": Vector2.ZERO, "life": 0.3,
+					"col": Color(2.4, 2.2, 1.4), "flash": true, "size": 26.0})
+				_pop(cp2 + Vector2(0, -40), "HALO OF RUIN", Color(2.2, 2.0, 1.1))
 	# screen ripple rolls outward
 	if shock_p < 1.0:
 		shock_p = minf(1.0, shock_p + delta * 1.8)
@@ -1574,7 +1659,7 @@ func _process(delta: float) -> void:
 
 func _move(delta: float) -> void:
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
-	vel += dir * 900.0 * delta
+	vel += dir * 900.0 * (1.6 if shift_t > 0.0 else 1.0) * delta
 	vel *= pow(0.02, delta)
 	vel = vel.limit_length(220.0)
 	pos += vel * delta
@@ -1721,6 +1806,16 @@ var amb_cd := 6.0
 var news_cd := 25.0
 var prev_tier_s := 0
 var champ_spawned := false
+# heralds — the void's answer to THE ROAR
+var herald_due := ""             # htype that will interrupt this battle
+var herald_timer := 45.0
+var herald_alive := false
+var growth_cap := 1.75
+var shift_t := 0.0               # predator shift burst
+var paradox_used := false
+var halo_cd := 25.0
+var prev_hp := 100.0
+var rift_cd := 0.0
 var serp_head: Texture2D
 var serp_body: Texture2D
 var serp_wing: Texture2D
@@ -1801,7 +1896,7 @@ func _tendrils(delta: float) -> void:
 		for u in units:
 			if grabbed_n >= max_grabs:
 				break
-			if u.get("grab", false):
+			if u.get("grab", false) or u.kind == "herald":
 				continue
 			if (u.pos + Vector2(0, -8)).distance_to(aim) < 17.0:
 				u.grab = true
@@ -2238,8 +2333,10 @@ func _tzitzi(delta: float) -> void:
 
 # ================= DROWNED ONE + PALE RIDER (ground gods) =================
 func _ground_move(delta: float, top_speed: float) -> void:
+	if shift_t > 0.0:
+		top_speed *= 1.5
 	var dir := Input.get_axis("move_left", "move_right")
-	vel.x += dir * 700.0 * delta
+	vel.x += dir * 700.0 * (1.6 if shift_t > 0.0 else 1.0) * delta
 	vel.x = clampf(vel.x * pow(0.03, delta) if dir == 0 else vel.x, -top_speed, top_speed)
 	vel.y += 500.0 * delta
 	if Input.is_action_pressed("move_up") and pos.y >= -14.0:
@@ -2304,7 +2401,108 @@ func _drowned(delta: float) -> void:
 			set_meta("last_tideborn", t)
 			allies.append({"kind": "fishman", "pos": Vector2(pos.x + randf_range(-40, 40), -4), "hp": 3, "cd": 0.0, "life": 30.0})
 
+var spawn_q: Array = []
+
+func _spawn_herald(htype: String) -> void:
+	herald_alive = true
+	var hd: Dictionary = HERALD_DEFS[htype]
+	var hx: float = clampf(pos.x + (400.0 if randf() < 0.5 else -400.0), 100.0, world_w - 100.0)
+	units.append({"kind": "herald", "htype": htype, "pos": Vector2(hx, -200.0 if hd.get("flies", false) else 0.0),
+		"cd": 2.0, "hp": hd.hp, "maxhp": hd.hp, "ht": 0.0, "vx": 0.0, "name": hd.name})
+	impact_frames = 3
+	shake = 20.0
+	_shockripple(Vector2(hx, -40.0))
+	_hitstop(220, 0.2)
+	_sfx("skyfall")
+	Global.music("doom")
+	_pop(Vector2(hx, -90), hd.name + " HAS COME FOR YOU", Color(2.4, 0.6, 0.9))
+	_pop(Vector2(hx, -74), "your roar carried too far. something answered.", Color(1.4, 0.9, 1.2))
+
+func _herald_ai(u: Dictionary, delta: float, dx: float) -> void:
+	var hd: Dictionary = HERALD_DEFS[u.htype]
+	u.ht += delta
+	var sc: float = hd.scale
+	# contact — standing beside a catastrophe hurts
+	if pos.distance_to(u.pos + Vector2(0, -14.0 * sc)) < 26.0 * sc and shift_t <= 0.0:
+		hp -= (9.0 if hd.ai == "hunt" else 5.0) * delta * dmg_taken_mult
+		if randf() < 2.0 * delta:
+			hit_flash = 0.7
+	match hd.ai:
+		"eat":
+			var tb = null
+			var td := 1e9
+			for b in buildings:
+				if not b.dead and b.dying <= 0.0 and b.topple == 0.0:
+					var dd: float = absf(b.x + b.w * 0.5 - u.pos.x)
+					if dd < td:
+						td = dd
+						tb = b
+			if tb == null:
+				u.pos.x = move_toward(u.pos.x, pos.x, 30.0 * delta)
+			elif td > tb.w * 0.5 + 12.0:
+				u.pos.x = move_toward(u.pos.x, tb.x + tb.w * 0.5, 34.0 * delta)
+			elif hd.get("armors", false):
+				if not tb.get("rusted", false):
+					tb.rusted = true
+					tb.hp = tb.maxhp * 1.5
+					_pop(Vector2(tb.x + tb.w * 0.5, -tb.cur_h - 10), "CONSECRATED IN RUST", Color(1.6, 1.0, 0.4))
+				u.pos.x += randf_range(-40.0, 40.0)
+			else:
+				tb.hp -= 15.0 * delta
+				if randf() < 3.0 * delta:
+					_carve(tb, Vector2(u.pos.x + randf_range(-12, 12), -randf_range(8, 44)), 4.0)
+				if tb.hp <= 0.0:
+					_collapse(tb)
+		"hunt":
+			if u.cd <= 0.0:
+				u.cd = 2.4
+				u.vx = signf(dx) * float(hd.get("spd", 200.0))
+				if hd.get("slam", false):
+					_shockwave(u.pos + Vector2(0, -6), 40.0)
+			u.pos.x += u.vx * delta
+			u.vx = move_toward(u.vx, 0.0, 260.0 * delta)
+		"cast":
+			u.pos.x = move_toward(u.pos.x, pos.x + 160.0 * signf(u.pos.x - pos.x + 0.1), 26.0 * delta)
+			if u.cd <= 0.0:
+				u.cd = 3.4
+				u.cast_p = pos.x
+				u.cast_t = 1.1
+				_sfx("groan")
+			if u.get("cast_t", 0.0) > 0.0:
+				u.cast_t -= delta
+				if u.cast_t <= 0.0:
+					var cp := Vector2(u.cast_p, -6.0)
+					_shockwave(cp, 34.0)
+					_flash(cp, 2.5)
+					_shockripple(cp)
+					if hd.get("from_below", false):
+						for b in buildings:
+							if not b.dead and b.dying <= 0.0 and absf(b.x + b.w * 0.5 - u.cast_p) < 40.0:
+								_collapse(b)
+								break
+					if pos.distance_to(cp) < 46.0:
+						hp -= 16.0 * dmg_taken_mult
+						hit_flash = 1.0
+		"spawn":
+			if hd.get("teleports", false) and u.ht > 4.0:
+				u.ht = 0.0
+				u.pos.x = clampf(pos.x + randf_range(-260, 260), 80.0, world_w - 80.0)
+				_boom(u.pos + Vector2(0, -16), 14, Color(1.4, 0.5, 1.8), 90.0)
+			if u.cd <= 0.0:
+				u.cd = 3.0
+				for i in 2:
+					spawn_q.append({"kind": "brood", "pos": u.pos + Vector2(randf_range(-20, 20), 0), "cd": 1.0, "hp": 1})
+		"leech":
+			u.pos.x = move_toward(u.pos.x, pos.x, 44.0 * delta)
+			if absf(dx) < 150.0:
+				meter = maxf(0.0, meter - 6.0 * delta)
+				essence_eaten = maxf(0.0, essence_eaten - 3.0 * delta)
+				if randf() < 0.8 * delta:
+					_pop(u.pos + Vector2(0, -30.0 * sc), "IT DRINKS YOUR NAME", Color(0.7, 0.75, 1.4))
+
 func _madden(u: Dictionary) -> void:
+	if u.kind in ["herald", "brood"]:
+		return
 	# a priest's ward turns the whisper away
 	for u2 in units:
 		if u2.kind == "priest" and not u2.get("dead", false) and not u2.get("mad", false) \
@@ -2500,6 +2698,8 @@ func _allies_update(delta: float) -> void:
 							dmg = 2
 						elif a.kind == "whelp":
 							dmg = 4
+						elif a.kind == "echoself":
+							dmg = 3
 						if in_flood and character == "drowned":
 							dmg += 1
 						prey.hp = prey.get("hp", 1) - dmg
@@ -2835,6 +3035,28 @@ func _collapse(b: Dictionary) -> void:
 			shake = 22.0
 	if b.get("special", "") != "":
 		specials_down += 1
+	# stolen powers answer every razing
+	if "gravitymaw" in Global.grafts:
+		for u in units:
+			if not u.get("dead", false) and not u.kind in ["jet", "herald"] and absf(u.pos.x - cx) < 170.0:
+				u.hp = u.get("hp", 1) - 1
+				_boom(u.pos + Vector2(0, -8), 5, Color(1.5, 1.0, 0.6), 70.0)
+				if u.hp <= 0:
+					u.dead = true
+					_kill_unit(u)
+	if "faultline" in Global.grafts:
+		for u in units:
+			if not u.get("dead", false) and u.kind in ["police", "soldier", "tank", "arty", "flamer", "priest"] \
+					and absf(u.pos.x - cx) < 80.0:
+				u.hp = u.get("hp", 1) - 2
+				u.fall = true
+				u.vy = -70.0
+				if u.hp <= 0:
+					u.dead = true
+					_kill_unit(u)
+		parts.append({"pos": Vector2(cx, -2), "vel": Vector2.ZERO, "life": 0.4, "col": Color(1.6, 0.9, 0.4), "ring": true, "size": 8.0})
+	if "assimilate" in Global.grafts:
+		hp = minf(100.0, hp + 8.0)
 	# ruptured gas main — the street answers in fire
 	if node_kind in ["city", "capital"] and b.get("special", "") == "" and randf() < 0.15:
 		var gdir: float = 1.0 if randf() < 0.5 else -1.0
@@ -3148,6 +3370,29 @@ func _kill_unit(u: Dictionary) -> void:
 			threat = minf(100.0, threat + 8.0)
 			_pop(u.pos + Vector2(0, -14), "LIVE FEED SEVERED — THE WORLD SAW", Color(2.0, 0.5, 0.4))
 		"flamer": base = 350
+		"brood": base = 150
+		"herald":
+			base = 20000
+			var hd: Dictionary = HERALD_DEFS[u.htype]
+			herald_alive = false
+			herald_due = ""
+			Global.heralds_slain.append(u.htype)
+			Global.grafts.append(hd.graft)
+			Global.roar += 150.0
+			if Global.heralds_slain.size() >= 3:
+				Global.act3_ready = true
+			Global.save_crusade()
+			growth_cap = 1.75 + 0.35 * Global.heralds_slain.size()
+			impact_frames = 4
+			shake = 26.0
+			_shockripple(u.pos)
+			Global.music("battle", tier)
+			hp = minf(100.0, hp + 40.0)
+			_pop(u.pos + Vector2(0, -60), hd.name + " IS DEVOURED", Color(2.4, 1.2, 0.9))
+			_pop(pos + Vector2(0, -30), "GRAFT SEIZED: " + hd.gname, Color(1.8, 1.9, 1.0))
+			_pop(pos + Vector2(0, -18), hd.gdesc, Color(1.3, 1.4, 0.9))
+			if Global.act3_ready:
+				_pop(Vector2(pos.x, -110), "THE STARS ARE LISTENING NOW", Color(2.0, 1.4, 2.2))
 		"priest":
 			base = 500
 			_pop(u.pos + Vector2(0, -14), "THE PRAYER ENDS", Color(1.8, 1.6, 1.0))
@@ -3169,6 +3414,9 @@ func _kill_unit(u: Dictionary) -> void:
 	hp = minf(100.0, hp + ((6.0 if u.kind == "tank" else 4.0) + (6.0 if nodes.has("cloud") else 0.0)) * heal_mult)
 	threat = minf(100.0, threat + 1.5)
 	shake = 10.0
+	# SPAWN BROOD graft — your kills birth fighters
+	if "spawnbrood" in Global.grafts and randf() < 0.25 and allies.size() < 14:
+		allies.append({"kind": "risen", "pos": Vector2(u.pos.x, -4), "hp": 2, "cd": 0.0, "life": 20.0})
 	if u.kind in ["tank", "heli", "jet", "arty"]:
 		_hitstop(60, 0.4)
 	_explode(u.pos + Vector2(0, -8), u.kind)
@@ -3334,6 +3582,14 @@ func _army(delta: float) -> void:
 			"champ":
 				# the champion advances like a tank and answers in salvos
 				u.pos.x += signf(dx) * 22.0 * delta * slow
+			"herald":
+				_herald_ai(u, delta, dx)
+			"brood":
+				u.pos.x += signf(dx) * 55.0 * delta * slow
+				if absf(dx) < 16.0 and pos.y > -40.0 and u.cd <= 0.0:
+					u.cd = 0.9
+					hp -= 3.0 * dmg_taken_mult
+					hit_flash = 0.6
 			"jet":
 				u.pos.x += u.vx * delta
 				if absf(dx) < 90.0 and u.bombs > 0:
@@ -3345,7 +3601,7 @@ func _army(delta: float) -> void:
 		u.cd -= delta
 		u.mf = maxf(0.0, u.get("mf", 0.0) - delta)
 		var fire_range: float = 700.0 if u.kind == "arty" else 420.0
-		if u.cd <= 0.0 and absf(dx) < fire_range and not u.kind in ["jet", "news", "flamer", "priest"]:
+		if u.cd <= 0.0 and absf(dx) < fire_range and not u.kind in ["jet", "news", "flamer", "priest", "herald", "brood"]:
 			u.cd = maxf(0.4, (randf_range(1.1, 2.0) - tier * 0.12) / defense)
 			u.mf = 0.07
 			var origin: Vector2 = u.pos + Vector2(0, -18 if u.kind != "heli" else 4)
@@ -3359,6 +3615,14 @@ func _army(delta: float) -> void:
 					tdist = da
 					tgt = a.pos + Vector2(0, -6)
 					tvel = Vector2.ZERO
+			# the army fights the war on two fronts — heralds draw fire too
+			for u2 in units:
+				if u2.kind == "herald":
+					var dh: float = (u2.pos - u.pos).length()
+					if dh < tdist:
+						tdist = dh
+						tgt = u2.pos + Vector2(0, -22)
+						tvel = Vector2.ZERO
 			var lead: Vector2 = tgt + tvel * 0.35
 			if u.kind == "champ":
 				# a fan of three heavy shells
@@ -3383,10 +3647,23 @@ func _army(delta: float) -> void:
 					dirv = dirv.rotated(randf_range(-0.28, 0.28))  # the choir frays their nerve
 				shells.append({"pos": origin, "vel": dirv * speed, "life": 4.0,
 					"heavy": not (u.kind in ["police", "soldier"])})
+	units.append_array(spawn_q)
+	spawn_q.clear()
 	units = units.filter(func(u): return not u.get("dead", false))
 	for s in shells:
 		if s.get("arc", false):
 			s.vel.y += 230.0 * delta
+		# stray ordnance finds the other monster
+		if not s.get("friendly", false) and s.life > 0.0:
+			for u2 in units:
+				if u2.kind == "herald" and (u2.pos + Vector2(0, -22) - s.pos).length() < 30.0:
+					u2.hp -= 2
+					s.life = 0.0
+					_boom(s.pos, 5, Color(1.6, 0.9, 0.5), 60.0)
+					if u2.hp <= 0:
+						u2.dead = true
+						_kill_unit(u2)
+					break
 		s.pos += s.vel * delta
 		s.life -= delta
 		if s.get("splash", false) and s.pos.y >= 0.0:
@@ -3513,6 +3790,8 @@ func _finish(win: bool, et: Dictionary) -> void:
 			_end(et.lose, "%s  score %s  —  R restart / ESC menu" % [et.lose_s, _fmt(int(score_f))])
 		return
 	# --- crusade flow ---
+	# every meal makes the roar louder — and the void keeps count
+	Global.roar += maxf(0.0, essence_eaten - essence_start)
 	if win:
 		var award := int(score_f / 1000.0 * tribute_mult)
 		if bonus_obj != "" and bonus_met:
@@ -4269,6 +4548,39 @@ func _draw_actors() -> void:
 				var to_swarm := (pos - p).normalized()
 				draw_colored_polygon(PackedVector2Array([p, p + to_swarm * 90.0 + to_swarm.orthogonal() * 22.0,
 					p + to_swarm * 90.0 - to_swarm.orthogonal() * 22.0]), Color(1.0, 1.0, 0.85, 0.05))
+			"herald":
+				var hd: Dictionary = HERALD_DEFS[u.htype]
+				var hsc: float = hd.scale
+				var hcol: Color = hd.col
+				var flies: bool = hd.get("flies", false)
+				var hp0: Vector2 = p + Vector2(0, -14.0 * hsc + (sin(t * 2.0) * 6.0 if flies else 0.0))
+				# aura — the wrongness bleeds into the air
+				draw_circle(hp0, 20.0 * hsc, Color(hcol.r, hcol.g, hcol.b, 0.10))
+				# mass
+				draw_circle(hp0, 14.0 * hsc, hcol.darkened(0.35))
+				draw_circle(hp0 + Vector2(4.0 * hsc, -4.0 * hsc), 10.0 * hsc, hcol)
+				draw_circle(hp0 + Vector2(-6.0 * hsc, 2.0 * hsc), 8.0 * hsc, hcol.darkened(0.2))
+				# spines
+				for si in 4:
+					var sa: float = -PI * 0.5 + (si - 1.5) * 0.5 + sin(t * 1.5 + si) * 0.1
+					draw_line(hp0, hp0 + Vector2.from_angle(sa) * 22.0 * hsc, hcol.darkened(0.45), 2.5)
+				# eyes — a hungry constellation, watching you
+				var fdir: float = signf(pos.x - p.x)
+				for ei in 3:
+					draw_circle(hp0 + Vector2((ei - 1) * 4.0 * hsc * fdir + 5.0 * hsc * fdir, -2.0 * hsc),
+						1.6, Color(2.2, 0.6, 0.8))
+				# caster telegraph
+				if u.get("cast_t", 0.0) > 0.0:
+					draw_line(Vector2(u.cast_p, -300), Vector2(u.cast_p, 0),
+						Color(2.0, 0.5, 0.4, 0.5 + 0.3 * sin(t * 20.0)), 3.0)
+					draw_circle(Vector2(u.cast_p, -4), 40.0, Color(1.8, 0.4, 0.3, 0.15))
+				draw_string(ui_font, hp0 + Vector2(0, -26.0 * hsc - 8.0), u.name,
+					HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(2.2, 0.7, 1.0))
+				draw_rect(Rect2(hp0.x - 30, hp0.y - 26.0 * hsc, 60, 3), Color(0.08, 0.05, 0.1))
+				draw_rect(Rect2(hp0.x - 30, hp0.y - 26.0 * hsc, 60.0 * u.hp / float(u.maxhp), 3), Color(2.0, 0.5, 0.8))
+			"brood":
+				draw_circle(p + Vector2(0, -5 + sin(t * 8.0 + p.x) * 2.0), 3.0, Color(0.55, 0.2, 0.6))
+				draw_circle(p + Vector2(1, -6), 1.0, Color(1.8, 0.6, 1.2))
 			"flamer":
 				draw_rect(Rect2(p.x - 2, p.y - 7, 4, 5), Color("#5a4430"))
 				draw_rect(Rect2(p.x - 2, p.y - 9, 4, 2), Color("#403020"))
