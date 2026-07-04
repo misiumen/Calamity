@@ -130,6 +130,11 @@ const ARRIVE_LINES := {
 var ambient: Array = []          # drifting embers/dust
 var frags: Array = []            # tumbling building fragments
 var flash_t := 0.0               # white screen flash on big events
+var impact_frames := 0           # hard white frames on the biggest hits
+var fire_lights: Array = []      # pooled PointLight2D for blazes
+var flash_light: PointLight2D
+var post_mat: ShaderMaterial
+var shock_p := 1.0               # screen ripple progress (>=1 idle)
 # --- essence: each god feeds on something different ---
 var essence_eaten := 0.0         # lifetime total -> growth
 var growth := 1.0                # body scale multiplier
@@ -389,18 +394,54 @@ func _setup_sfx() -> void:
 		p.volume_db = -8.0
 		add_child(p)
 		sfx_players.append(p)
-	sfx_bank["boom"] = _synth(0.5, 9.0, 70.0, 0.5)
-	sfx_bank["thunder"] = _synth(0.9, 3.5, 52.0, 0.65)
-	sfx_bank["skyfall"] = _synth(1.3, 2.2, 40.0, 0.8)
+	sfx_bank["boom"] = _synth_mix(1.1, [[9.0, 52.0, 0.75, 0.9, 0.0], [30.0, 0.0, 0.0, 0.7, 0.0], [2.4, 0.0, 0.0, 0.35, 0.05]])
+	sfx_bank["thunder"] = _synth_mix(1.6, [[3.5, 52.0, 0.65, 0.9, 0.0], [40.0, 0.0, 0.0, 0.8, 0.0], [1.4, 0.0, 0.0, 0.4, 0.25]])
+	sfx_bank["skyfall"] = _synth_mix(2.0, [[2.2, 40.0, 0.8, 1.0, 0.0], [24.0, 0.0, 0.0, 0.7, 0.0], [1.1, 0.0, 0.0, 0.45, 0.3]])
+	sfx_bank["groan"] = _synth_mix(1.5, [[1.6, 68.0, 0.8, 0.7, 0.0], [8.0, 210.0, 0.5, 0.25, 0.3], [3.0, 0.0, 0.0, 0.3, 0.1]])
+	sfx_bank["crush"] = _synth_mix(1.4, [[11.0, 48.0, 0.8, 1.0, 0.0], [26.0, 0.0, 0.0, 0.8, 0.0], [1.8, 0.0, 0.0, 0.45, 0.08]])
 	sfx_bank["bite"] = _synth(0.07, 45.0, 0.0, 0.0)
 	sfx_bank["lash"] = _synth(0.22, 14.0, 0.0, 0.0)
 	sfx_bank["grab"] = _synth(0.1, 30.0, 140.0, 0.3)
-	sfx_bank["crumble"] = _synth(0.9, 3.0, 45.0, 0.4)
+	sfx_bank["crumble"] = _synth_mix(1.8, [[3.0, 45.0, 0.4, 0.8, 0.0], [1.6, 0.0, 0.0, 0.5, 0.15], [14.0, 0.0, 0.0, 0.5, 0.0]])
 	sfx_bank["pick"] = _synth(0.18, 10.0, 660.0, 0.8)
 	sfx_bank["eclipse"] = _synth(1.6, 1.4, 48.0, 0.9)
 	sfx_bank["hit"] = _synth(0.13, 22.0, 200.0, 0.5)
 	sfx_bank["bell"] = _synth(1.8, 1.2, 190.0, 0.92)
 	sfx_bank["glass"] = _synth(0.3, 16.0, 2400.0, 0.25)
+
+func _synth_mix(dur: float, layers: Array) -> AudioStreamWAV:
+	# layered one-shots: each layer = [decay, tone_hz, tone_mix, gain, delay]
+	var rate := 22050
+	var n := int(dur * rate)
+	var acc := PackedFloat32Array()
+	acc.resize(n)
+	for L in layers:
+		var decay: float = L[0]
+		var tone_hz: float = L[1]
+		var tone_mix: float = L[2]
+		var gain: float = L[3]
+		var d0: int = int(float(L[4]) * rate)
+		var lp := 0.0
+		for i in range(d0, n):
+			var ts: float = float(i - d0) / rate
+			var env: float = exp(-ts * decay)
+			var noise: float = randf() * 2.0 - 1.0
+			lp = lp * 0.82 + noise * 0.18
+			var s: float = lp * (1.0 - tone_mix)
+			if tone_hz > 0.0:
+				s += sin(TAU * tone_hz * ts * (1.0 - ts * 0.15)) * tone_mix
+			acc[i] += s * env * gain
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		var v := int(clampf(acc[i], -1.0, 1.0) * 30000.0)
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.data = data
+	return wav
 
 func _synth_loop(dur: float) -> AudioStreamWAV:
 	# looped wind: heavy low-passed noise with a slow swell
@@ -656,6 +697,18 @@ func _apply_branch_stats() -> void:
 	if nodes.has("blackdawn"):
 		eclipse_len += 8.0
 
+func _flash(p: Vector2, e: float) -> void:
+	flash_light.position = p
+	flash_light.energy = maxf(flash_light.energy, e)
+
+func _shockripple(world: Vector2) -> void:
+	var rel: Vector2 = ((world - cam.position) * cam.zoom.x + Vector2(320.0, 180.0)) / Vector2(640.0, 360.0)
+	if rel.x < -0.1 or rel.x > 1.1 or rel.y < -0.1 or rel.y > 1.1:
+		return
+	shock_p = 0.0
+	post_mat.set_shader_parameter("shock_c", rel)
+	post_mat.set_shader_parameter("shock_p", 0.0)
+
 func _hitstop(ms: int, scale: float) -> void:
 	Engine.time_scale = scale
 	hitstop_until = Time.get_ticks_msec() + ms
@@ -672,7 +725,23 @@ func _setup_env() -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://post.gdshader")
 	post.material = mat
+	post_mat = mat
 	post_layer.add_child(post)
+	# firelight pool + one big flash light for strikes
+	for i in 6:
+		var fl := PointLight2D.new()
+		fl.texture = _radial_tex(96)
+		fl.color = Color(1.6, 0.75, 0.3)
+		fl.energy = 0.0
+		fl.texture_scale = 1.6
+		add_child(fl)
+		fire_lights.append(fl)
+	flash_light = PointLight2D.new()
+	flash_light.texture = _radial_tex(128)
+	flash_light.color = Color(1.5, 1.6, 2.0)
+	flash_light.energy = 0.0
+	flash_light.texture_scale = 6.0
+	add_child(flash_light)
 	# wind ambience — a low loop, synthesized
 	var wind := AudioStreamPlayer.new()
 	wind.stream = _synth_loop(3.0)
@@ -1068,7 +1137,8 @@ func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "to
 	return {"x": x, "w": w, "h": h, "sc": sc, "img": img,
 		"tex": ImageTexture.create_from_image(img),
 		"hp": mass, "maxhp": mass, "holes": [], "dead": false, "dying": 0.0, "cit": cit,
-		"cur_h": h, "seed": x * 0.77, "burn": 0.0, "kind": kind, "flames": []}
+		"cur_h": h, "seed": x * 0.77, "burn": 0.0, "kind": kind, "flames": [],
+		"topple": 0.0, "top_dir": 0.0, "top_chain": 0, "base_carve": 0.0, "carve_bias": 0.0}
 
 func _hash(n: float) -> float:
 	return fmod(absf(sin(n * 127.1) * 43758.55), 1.0)
@@ -1079,6 +1149,10 @@ const MAX_HOLES := 44
 func _carve(b: Dictionary, world: Vector2, r_px: float) -> void:
 	if b.holes.size() > MAX_HOLES:
 		b.holes = b.holes.slice(b.holes.size() - MAX_HOLES)
+	# structural ledger: wounds in the bottom quarter undermine the whole tower
+	if world.y > -b.h * 0.28:
+		b.base_carve += r_px
+		b.carve_bias += signf(world.x - (b.x + b.w * 0.5)) * r_px
 	var ix := int((world.x - b.x) / b.sc)
 	var iy := int((world.y + b.h) / b.sc)
 	var r := int(r_px / b.sc)
@@ -1110,6 +1184,12 @@ func _process(delta: float) -> void:
 	t += delta
 	if OS.get_environment("CAL_SHOT") != "":
 		_shot_frames += 1
+		if OS.get_environment("CAL_TEST") == "topple" and _shot_frames == 85:
+			for b in buildings:
+				if not b.dead and b.h > b.w and absf(b.x - pos.x) < 320.0 \
+						and b.get("special", "") == "" and not b.cit:
+					_topple(b, 1.0)
+					break
 		if _shot_frames == 130:
 			get_viewport().get_texture().get_image().save_png(OS.get_environment("CAL_SHOT"))
 			get_tree().quit()
@@ -1178,6 +1258,26 @@ func _process(delta: float) -> void:
 		fr.pos += fr.vel * delta
 		fr.rot += fr.rotv * delta
 		fr.life -= delta
+		# flying masonry is not decoration
+		if not fr.get("spent", false) and fr.vel.length_squared() > 3600.0:
+			for u in units:
+				if not u.get("dead", false) and u.kind != "jet" \
+						and (u.pos + Vector2(0, -6) - fr.pos).length() < maxf(fr.w, fr.h) * 0.5 + 6.0:
+					u.hp = u.get("hp", 1) - 1
+					fr.spent = true
+					_boom(fr.pos, 4, Color(0.55, 0.45, 0.45), 55.0)
+					if u.hp <= 0:
+						u.dead = true
+						_kill_unit(u)
+					break
+			if not fr.get("spent", false) and fr.pos.y > -14.0:
+				for pe in people:
+					if not pe.get("dead", false) and absf(pe.pos.x - fr.pos.x) < fr.w * 0.5 + 4.0:
+						pe.dead = true
+						fr.spent = true
+						score_f += 20.0 * combo * TIER_MULT[tier]
+						_mist(Vector2(pe.pos.x, -5))
+						break
 		if fr.pos.y >= -2.0 and fr.vel.y > 0.0:
 			if fr.vel.y > 60.0:
 				fr.vel.y *= -0.3
@@ -1205,6 +1305,9 @@ func _process(delta: float) -> void:
 			if doom_t <= 0.0:
 				flash_t = 1.0
 				shake = 30.0
+				impact_frames = 3
+				_flash(doom_p, 4.0)
+				_shockripple(doom_p)
 				_hitstop(200, 0.2)
 				_sfx("skyfall")
 				parts.append({"pos": doom_p, "vel": Vector2.ZERO, "life": 0.5, "col": Color(2.6, 2.2, 1.4), "flash": true, "size": 60.0})
@@ -1262,6 +1365,39 @@ func _process(delta: float) -> void:
 	for b in buildings:
 		if b.holes.size() > 40:
 			b.holes = b.holes.slice(b.holes.size() - 40)
+		# undermined base → structural failure toward the wound
+		if not b.dead and b.dying <= 0.0 and b.topple == 0.0 and b.base_carve * b.sc > b.w * 5.0 \
+				and b.h > b.w * 0.9 and b.get("special", "") == "" and not b.cit:
+			_topple(b, signf(b.carve_bias) if b.carve_bias != 0.0 else signf(b.x + b.w * 0.5 - pos.x))
+		# the long fall
+		if b.topple > 0.0 and not b.dead:
+			var prev_a: float = minf(b.topple, 1.0) * PI * 0.5
+			b.topple = minf(1.0, b.topple + delta * (0.45 + b.topple * 2.6))
+			var ang3: float = minf(b.topple, 1.0) * PI * 0.5
+			var pvx: float = b.x + (b.w if b.top_dir > 0.0 else 0.0)
+			var lo2: float = minf(pvx + b.top_dir * b.cur_h * sin(prev_a), pvx + b.top_dir * b.cur_h * sin(ang3))
+			var hi2: float = maxf(pvx + b.top_dir * b.cur_h * sin(prev_a), pvx + b.top_dir * b.cur_h * sin(ang3))
+			# the sweeping shadow — everything under the falling mass
+			for pe in people:
+				if pe.pos.x >= lo2 and pe.pos.x <= hi2:
+					pe.dead = true
+					score_f += 20.0 * combo * TIER_MULT[tier]
+					_feed("flesh", 1.0)
+					_mist(Vector2(pe.pos.x, -5))
+			for u in units:
+				if not u.get("dead", false) and u.kind != "jet" and u.pos.y > -40.0 \
+						and u.pos.x >= lo2 and u.pos.x <= hi2:
+					u.hp = u.get("hp", 1) - 3
+					_boom(u.pos + Vector2(0, -8), 6, Color(0.5, 0.42, 0.45), 70.0)
+					if u.hp <= 0:
+						u.dead = true
+						_kill_unit(u)
+			if randf() < 0.6:
+				parts.append({"pos": Vector2(pvx + b.top_dir * b.cur_h * sin(ang3), -randf_range(2.0, 10.0)),
+					"vel": Vector2(b.top_dir * 30.0, -20.0), "life": 0.7,
+					"col": Color(0.35, 0.3, 0.33), "size": 4.0})
+			if b.topple >= 1.0:
+				_topple_land(b)
 		if b.dying > 0.0 and not b.dead:
 			b.dying -= delta
 			b.cur_h = maxf(b.h * 0.06, b.cur_h - b.h * 2.2 * delta)
@@ -1271,7 +1407,7 @@ func _process(delta: float) -> void:
 				b.dead = true
 				_sfx("crumble")
 		# fire damage over time: burning buildings waste away
-		if b.burn > 0.0 and not b.dead and b.dying <= 0.0:
+		if b.burn > 0.0 and not b.dead and b.dying <= 0.0 and b.topple == 0.0:
 			b.hp -= b.burn * 1.6 * delta
 			b.burn = maxf(0.0, b.burn - 0.35 * delta)
 			score_f += b.burn * 0.4 * delta * combo * TIER_MULT[tier]
@@ -1279,6 +1415,30 @@ func _process(delta: float) -> void:
 				_carve(b, Vector2(b.x + randf_range(4, b.w - 4), -randf_range(6, b.cur_h - 6)), 3.0)
 			if b.hp <= 0.0:
 				_collapse(b)
+	# firelight — the strongest blazes cast real light; ruins glow at night
+	var fi := 0
+	for b in buildings:
+		if fi >= fire_lights.size():
+			break
+		if b.burn > 0.4 and not b.dead:
+			var fl: PointLight2D = fire_lights[fi]
+			fl.position = Vector2(b.x + b.w * 0.5, -b.cur_h * 0.55)
+			fl.energy = minf(1.1, b.burn * 0.35) * (0.85 + 0.3 * sin(t * 11.0 + b.seed))
+			fl.texture_scale = 1.2 + b.w * 0.012
+			fi += 1
+		elif night_f > 0.5 and b.dead and t < b.get("smolder", 0.0):
+			var fl2: PointLight2D = fire_lights[fi]
+			fl2.position = Vector2(b.x + b.w * 0.5, -6.0)
+			fl2.energy = 0.25 + 0.1 * sin(t * 5.0 + b.seed)
+			fl2.texture_scale = 1.0
+			fi += 1
+	for j in range(fi, fire_lights.size()):
+		fire_lights[j].energy = 0.0
+	flash_light.energy = maxf(0.0, flash_light.energy - 9.0 * delta)
+	# screen ripple rolls outward
+	if shock_p < 1.0:
+		shock_p = minf(1.0, shock_p + delta * 1.8)
+		post_mat.set_shader_parameter("shock_p", shock_p)
 	if parts.size() > MAX_PARTS:
 		parts = parts.slice(parts.size() - MAX_PARTS)
 	for p in parts:
@@ -1754,6 +1914,7 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 	shake = maxf(shake, 9.0 * power)
 	combo_idle = 0.0
 	threat = minf(100.0, threat + 1.2 * power)
+	_flash(p, 2.4 * power)
 	_sfx("thunder")
 	if branch == "ball" or nodes.has("twincast"):
 		var n_orbs: int = 2 if nodes.has("twincast") else 1
@@ -1802,6 +1963,9 @@ func _skyfall(p: Vector2) -> void:
 	parts.append({"pos": Vector2(p.x, -8), "vel": Vector2.ZERO, "life": 0.5, "col": Color(1.6, 2.0, 2.6), "ring": true, "size": 8.0})
 	flash_t = maxf(flash_t, 0.5)
 	shake = 18.0
+	_flash(Vector2(p.x, -80.0), 3.5)
+	_shockripple(Vector2(p.x, -40.0))
+	impact_frames = 2
 	_sfx("skyfall")
 	threat = minf(100.0, threat + 4.0)
 	for b in buildings:
@@ -2409,11 +2573,82 @@ func _ignite(b: Dictionary, amt: float) -> void:
 	if had < 0.2 and b.burn >= 0.2:
 		_sfx("boom")
 
+func _topple(b: Dictionary, dir: float, chain: int = 0) -> void:
+	# the tower doesn't crumble — it FALLS, and the street beneath is a shadow
+	if b.dead or b.dying > 0.0 or b.topple > 0.0:
+		return
+	b.topple = 0.001
+	b.top_dir = dir if dir != 0.0 else (1.0 if randf() < 0.5 else -1.0)
+	b.top_chain = chain
+	buildings_razed += 1
+	if b.get("special", "") != "":
+		specials_down += 1
+	_sfx("groan")
+	_hitstop(90, 0.4)
+	shake = maxf(shake, 8.0)
+	_pop(Vector2(b.x + b.w * 0.5, -b.cur_h - 10), "IT FALLS", Color(1.8, 1.2, 0.6))
+
+func _topple_land(b: Dictionary) -> void:
+	var pivot_x: float = b.x + (b.w if b.top_dir > 0.0 else 0.0)
+	var span_lo: float = minf(pivot_x, pivot_x + b.top_dir * b.cur_h)
+	var span_hi: float = maxf(pivot_x, pivot_x + b.top_dir * b.cur_h)
+	b.dead = true
+	b.smolder = t + 40.0
+	impact_frames = 2
+	shake = maxf(shake, 16.0)
+	flash_t = maxf(flash_t, 0.3)
+	_shockripple(Vector2(pivot_x + b.top_dir * b.cur_h * 0.5, -10.0))
+	_sfx("crush")
+	_hitstop(120, 0.25)
+	# masonry strewn along the whole fall line
+	var img_h3: float = b.img.get_height()
+	for i in 5 + int(b.cur_h / 26.0):
+		var fx: float = randf_range(span_lo, span_hi)
+		frags.append({"tex": b.tex,
+			"src": Rect2(randf() * b.img.get_width() * 0.6, randf() * img_h3 * 0.6,
+				b.img.get_width() * 0.3, img_h3 * 0.25),
+			"pos": Vector2(fx, -randf_range(4.0, 22.0)),
+			"vel": Vector2(randf_range(-50, 50), randf_range(-120, -30)),
+			"rot": 0.0, "rotv": randf_range(-3.0, 3.0),
+			"w": randf_range(8.0, 20.0), "h": randf_range(6.0, 14.0), "life": randf_range(1.2, 2.0)})
+	for side in [-1.0, 1.0]:
+		for i in 9:
+			parts.append({"pos": Vector2(clampf(pivot_x + b.top_dir * b.cur_h * 0.5 + side * i * 14.0, span_lo, span_hi), -3.0),
+				"vel": Vector2(side * randf_range(30, 80), randf_range(-20, -6)),
+				"life": randf_range(0.6, 1.4), "col": Color(0.35, 0.3, 0.33), "size": randf_range(3.0, 7.0)})
+	_hit_props(Vector2((span_lo + span_hi) * 0.5, -4), (span_hi - span_lo) * 0.5)
+	# the neighbor takes the blow — and maybe follows
+	for b2 in buildings:
+		if b2 == b or b2.dead or b2.dying > 0.0 or b2.topple > 0.0:
+			continue
+		if b2.x < span_hi and b2.x + b2.w > span_lo:
+			var dmg2: float = b.maxhp * 0.45 * pow(0.55, b.top_chain)
+			b2.hp -= dmg2
+			for k in 3:
+				_carve(b2, Vector2(clampf(randf_range(span_lo, span_hi), b2.x + 3.0, b2.x + b2.w - 3.0),
+					-randf_range(b2.cur_h * 0.4, b2.cur_h * 0.95)), randf_range(3.0, 6.0))
+			if b2.hp <= 0.0:
+				if b.top_chain < 2 and b2.h > b2.w * 1.1 and randf() < 0.65:
+					_topple(b2, b.top_dir, b.top_chain + 1)
+				else:
+					_collapse(b2)
+	_sfx("crumble")
+
 func _collapse(b: Dictionary) -> void:
-	if b.dying > 0.0 or b.dead:
+	if b.dying > 0.0 or b.dead or b.topple > 0.0:
+		return
+	# tall stock prefers the sideways death — away from the killing blow
+	# (specials keep the straight-down death so their payoff effects always fire)
+	if b.h > b.w * 1.25 and not b.cit and b.get("special", "") == "" and b.topple == 0.0 and randf() < 0.55:
+		var dir: float = signf(b.x + b.w * 0.5 - pos.x)
+		_topple(b, dir)
 		return
 	b.dying = 0.28
+	b.smolder = t + 40.0
 	buildings_razed += 1
+	_shockripple(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.4))
+	if b.cit:
+		impact_frames = 3
 	# the crowd beneath does not escape
 	for pe in people:
 		if pe.pos.x > b.x - 12.0 and pe.pos.x < b.x + b.w + 12.0:
@@ -2477,6 +2712,7 @@ func _collapse(b: Dictionary) -> void:
 			_pop(Vector2(cx, -b.h - 26), "COMMS TOWER DOWN — the alarm slows", Color(0.5, 1.6, 2.0))
 			score_f += 2000.0 * combo
 		"fuel":
+			_flash(Vector2(cx, -30.0), 3.0)
 			_pop(Vector2(cx, -b.h - 26), "FUEL DEPOT IGNITES", Color(2.2, 0.8, 0.2))
 			score_f += 1500.0 * combo
 			for i in 6:
@@ -2891,6 +3127,12 @@ func _army(delta: float) -> void:
 		var dx: float = pos.x - u.pos.x
 		var slow: float = u.get("slow", 1.0)
 		u.slow = 1.0
+		# rubble is bad ground — the army climbs your leavings
+		if u.kind in ["police", "soldier", "tank", "arty"]:
+			for b in buildings:
+				if b.dead and u.pos.x > b.x and u.pos.x < b.x + b.w:
+					slow = minf(slow, 0.55)
+					break
 		match u.kind:
 			"police": u.pos.x += signf(dx) * 34.0 * delta * slow
 			"soldier": u.pos.x += signf(dx) * 24.0 * delta * slow
@@ -3005,7 +3247,7 @@ func _army(delta: float) -> void:
 func _eaten_frac() -> float:
 	var eaten := 0.0
 	for b in buildings:
-		eaten += b.maxhp if (b.dead or b.dying > 0.0) else (b.maxhp - b.hp)
+		eaten += b.maxhp if (b.dead or b.dying > 0.0 or b.topple > 0.0) else (b.maxhp - b.hp)
 	return eaten / total_mass
 
 func _check_end() -> void:
@@ -3397,6 +3639,9 @@ func _draw() -> void:
 	# impact flash — the whole world blinks white
 	if flash_t > 0.0:
 		draw_rect(Rect2(left, -540, right - left, 940), Color(1.0, 0.97, 0.9, flash_t * 0.3))
+	if impact_frames > 0:
+		impact_frames -= 1
+		draw_rect(Rect2(left, -540, right - left, 940), Color(1.0, 1.0, 0.98, 0.85))
 
 const DUSK_SKY := [Color("#3a2a50"), Color("#7a3a50"), Color("#c05a3c"), Color("#e8924e"), Color("#f8c877")]
 
@@ -3534,15 +3779,43 @@ func _draw_backdrop(left: float, right: float, cx: float) -> void:
 
 func _draw_building(b: Dictionary) -> void:
 	if b.dead:
-		draw_rect(Rect2(b.x, -b.cur_h, b.w, b.cur_h), Color("#100a14"))
-		draw_rect(Rect2(b.x + b.w * 0.12, -b.cur_h - 4, b.w * 0.32, 4), Color("#181020"))
-		draw_rect(Rect2(b.x + b.w * 0.55, -b.cur_h - 7, b.w * 0.28, 7), Color("#181020"))
-		if randf() < 0.06:
-			_fire(Vector2(b.x + randf() * b.w, -b.cur_h - 2))
+		# a jagged heap, not a flat stump
+		var mh: float = minf(22.0, 6.0 + b.w * 0.14)
+		var pts := PackedVector2Array([Vector2(b.x - 4, 0)])
+		var n: int = maxi(4, int(b.w / 14.0))
+		for i in n + 1:
+			pts.append(Vector2(b.x + b.w * float(i) / n,
+				-mh * (0.35 + _hash(b.seed + i) * 0.65) * (1.0 if i % 2 == 0 else 0.6)))
+		pts.append(Vector2(b.x + b.w + 4, 0))
+		draw_colored_polygon(pts, Color("#141018"))
+		for i in 4:
+			draw_rect(Rect2(b.x + _hash(b.seed + 9 + i) * b.w * 0.85,
+				-mh * 0.5 - _hash(b.seed + 20 + i) * 4.0,
+				5.0 + _hash(b.seed + 30 + i) * 6.0, 4.0), Color("#1c1622"))
+		if night_f > 0.4 and randf() < 0.35:
+			draw_rect(Rect2(b.x + randf() * b.w, -randf() * mh * 0.6 - 1.0, 1.5, 1.5),
+				Color(2.0, 0.8, 0.25, 0.7))
+		# the ruin smolders for a long while
+		if t < b.get("smolder", 0.0):
+			if randf() < 0.10:
+				parts.append({"pos": Vector2(b.x + randf() * b.w, -mh * 0.6),
+					"vel": Vector2(randf_range(-4, 4), randf_range(-24, -12)),
+					"life": randf_range(1.2, 2.6), "col": Color(0.2, 0.18, 0.2),
+					"fire": true, "smoke": true, "size": randf_range(2.5, 4.5)})
+			if randf() < 0.05:
+				_fire(Vector2(b.x + randf() * b.w, -mh * 0.5))
 		return
 	var img_h: float = b.img.get_height()
 	var vis_frac: float = b.cur_h / b.h
 	var src := Rect2(0, img_h * (1.0 - vis_frac), b.img.get_width(), img_h * vis_frac)
+	# mid-fall: the whole body rotates around its base corner
+	if b.topple > 0.0:
+		var ang: float = minf(b.topple, 1.0) * PI * 0.5 * b.top_dir
+		var pivot := Vector2(b.x + (b.w if b.top_dir > 0.0 else 0.0), 0.0)
+		draw_set_transform(pivot, ang, Vector2.ONE)
+		draw_texture_rect_region(b.tex, Rect2(b.x - pivot.x, -b.cur_h, b.w, b.cur_h), src, city_def.tint)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 	var tint: Color = city_def.tint
 	if blackout_t > 0.0:
 		tint = tint * Color(0.2, 0.18, 0.28)   # the serpent ate the light — windows die
