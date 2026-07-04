@@ -17,6 +17,8 @@ var c_branch := ""
 var c_nodes := {}
 var c_bio_stage := 0
 var c_essence := 0.0
+var node_fates := {}             # act 2: node_id -> fate tag, rolled once per crusade
+var alert_discount := 0          # quiet roads earned — lowers effective World Alert
 # params handed to the next run
 var node_params := {}
 
@@ -127,6 +129,8 @@ func reset_crusade(chr: String) -> void:
 	c_nodes = {}
 	c_bio_stage = 0
 	c_essence = 0.0
+	node_fates = {}
+	alert_discount = 0
 	save_crusade()
 
 func launch_act1() -> void:
@@ -145,7 +149,8 @@ func save_crusade() -> void:
 	if f:
 		f.store_string(JSON.stringify({"character": character, "act": act, "node_i": node_i,
 			"map_pos": map_pos, "razed": razed, "tribute": tribute, "relics": relics,
-			"c_branch": c_branch, "c_nodes": c_nodes, "c_bio_stage": c_bio_stage, "c_essence": c_essence}))
+			"c_branch": c_branch, "c_nodes": c_nodes, "c_bio_stage": c_bio_stage, "c_essence": c_essence,
+			"node_fates": node_fates, "alert_discount": alert_discount}))
 
 func load_crusade() -> bool:
 	if not FileAccess.file_exists(SAVE_PATH):
@@ -165,5 +170,7 @@ func load_crusade() -> bool:
 	c_nodes = d.get("c_nodes", {})
 	c_bio_stage = int(d.get("c_bio_stage", 0))
 	c_essence = float(d.get("c_essence", 0.0))
+	node_fates = d.get("node_fates", {})
+	alert_discount = int(d.get("alert_discount", 0))
 	mode = "crusade"
 	return true

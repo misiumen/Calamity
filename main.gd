@@ -141,6 +141,7 @@ var growth := 1.0                # body scale multiplier
 var growth_mult := 1.0           # stage scale: prologue whelp / act-1 ramp / relics
 # --- crusade node state ---
 var node_kind := "city"          # hamlet | town | city | capital
+var node_fate := ""              # act-2 road fate tag
 var tier_cap := 5
 var objective := "raze"
 var obj_timer := 0.0
@@ -550,7 +551,26 @@ func _apply_campaign() -> void:
 	objective = p.get("objective", "raze")
 	world_w = float(p.get("world_w", 4600.0))
 	threat = float(p.get("alert", 0)) * 7.0
+	threat = minf(100.0, threat + float(p.get("threat_bonus", 0.0)))
 	is_capital = p.get("capital", false)
+	# the road's fate colors the battle
+	node_fate = p.get("fate", "")
+	match node_fate:
+		"richfeeding": essence_mult *= 1.5
+		"garrisoned":
+			city_def = city_def.duplicate()
+			city_def.defense *= 1.3
+			city_def.spawn_mult *= 1.2
+			tribute_mult *= 1.5
+		"stormcrossing":
+			if character in ["keraunos", "tzitzimitl"]:
+				essence_mult *= 1.5
+		"titheroad": tribute_mult *= 1.75
+		"cache": meter = maxf(meter, 60.0)
+	# faithful met on the road march with you
+	for i in int(p.get("allies_bonus", 0)):
+		allies.append({"kind": "cultist", "pos": Vector2(pos.x + 30.0 + i * 16.0, -4),
+			"hp": 3, "cd": 0.0, "life": 1e9})
 	if is_capital:
 		city_def = city_def.duplicate()
 		city_def.defense *= 1.4
@@ -1129,7 +1149,7 @@ func _build_city() -> void:
 		specials_total += 1
 	for b in buildings:
 		total_mass += b.maxhp
-	people_total = 70
+	people_total = 112 if node_fate == "refugees" else 70
 	# destructible street furniture
 	for pn in ["control-box-1", "control-box-2", "control-box-3", "monitor-face-1"]:
 		prop_texs.append(load("res://art/props/%s.png" % pn))
@@ -1162,7 +1182,7 @@ func _build_city() -> void:
 	while lamp_x < world_w - 300.0:
 		lamps.append({"x": lamp_x, "dead": false})
 		lamp_x += randf_range(80, 120)
-	for k in 70:
+	for k in people_total:
 		people.append({"pos": Vector2(randf_range(320, world_w - 350), 0), "vx": 0.0, "panic": false,
 			"o": randf() * TAU, "col": Color(randf_range(0.4, 0.7), randf_range(0.4, 0.6), randf_range(0.5, 0.75))})
 

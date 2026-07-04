@@ -28,12 +28,49 @@ const RELICS := [
 	{"id": "carrionwind", "name": "CARRION WIND", "desc": "+30% tribute from every city"},
 ]
 
+const FATE_NAMES := {
+	"richfeeding": "RICH FEEDING", "garrisoned": "GARRISONED", "cultshrine": "CULT SHRINE",
+	"refugees": "REFUGEE COLUMN", "stormcrossing": "STORM CROSSING", "quietroads": "QUIET ROADS",
+	"titheroad": "TITHE ROAD", "cache": "OLD CACHE",
+}
+const EVENTS := [
+	{"t": "A PILGRIM CARAVAN crosses your road, singing against the dark.",
+		"a": ["DEVOUR THEM ALL", {"essence": 35.0, "quiet": -1}],
+		"b": ["LET THEM PASS", {"quiet": 1}]},
+	{"t": "A LESSER BEAST crawls from the fen and offers fealty.",
+		"a": ["ACCEPT ITS SERVICE", {"allies": 2}],
+		"b": ["EAT THE OFFERING", {"essence": 50.0}]},
+	{"t": "A VILLAGE ELDER offers tribute if you spare his fields.",
+		"a": ["TAKE THE GOLD", {"tribute": 45}],
+		"b": ["TAKE EVERYTHING", {"essence": 25.0, "quiet": -1}]},
+	{"t": "A STRANGE IDOL stands at the crossroads, humming.",
+		"a": ["CLAIM IT", {"relic": true}],
+		"b": ["SHATTER IT", {"essence": 30.0}]},
+	{"t": "AN ARMY CHECKPOINT bars the fastest road.",
+		"a": ["SMASH THROUGH", {"tribute": 30, "threat": 12.0}],
+		"b": ["TAKE THE LONG WAY", {"quiet": 1}]},
+	{"t": "DESERTERS kneel in the mud and beg to be spared.",
+		"a": ["SPARE THEM — LET FEAR SPREAD", {"quiet": 1, "essence": 10.0}],
+		"b": ["THE HARVEST TAKES ALL", {"essence": 30.0, "quiet": -1}]},
+]
+
 var ui_font: FontFile
 var picking_relic := false
+var in_event := false
+var ev_extra := {}               # event outcome folded into the next launch
 
 func _ready() -> void:
 	Global.music("map")
 	ui_font = load("res://art/Silkscreen-Regular.ttf")
+	# roll each crusade's road-fates once — the map is a hand you're dealt
+	if not Global.node_fates.has("rolled"):
+		Global.node_fates["rolled"] = true
+		var pool := ["richfeeding", "garrisoned", "cultshrine", "refugees",
+			"stormcrossing", "quietroads", "titheroad", "cache"]
+		for n in NODES:
+			if n.kind in ["hamlet", "town"] and randf() < 0.8:
+				Global.node_fates[str(n.id)] = pool[randi() % pool.size()]
+		Global.save_crusade()
 	# offered a relic after each razing (skip the very first arrival)
 	picking_relic = Global.node_params.get("offer_relic", false)
 	Global.node_params = {}
@@ -50,7 +87,7 @@ func _reachable(id: int) -> bool:
 	return false
 
 func _unhandled_input(e: InputEvent) -> void:
-	if picking_relic:
+	if picking_relic or in_event:
 		return
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
 		get_tree().change_scene_to_file("res://menu.tscn")
@@ -66,8 +103,71 @@ func _unhandled_input(e: InputEvent) -> void:
 					picking_relic = true
 					_relic_overlay()
 					return
-				_launch(n)
+				# the road itself has opinions
+				if randf() < 0.4:
+					_event_overlay(n)
+				else:
+					_launch(n)
 				return
+
+func _event_overlay(n: Dictionary) -> void:
+	in_event = true
+	var ev: Dictionary = EVENTS[randi() % EVENTS.size()]
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	var dim := ColorRect.new()
+	dim.size = Vector2(640, 360)
+	dim.color = Color(0.02, 0.0, 0.05, 0.85)
+	layer.add_child(dim)
+	var title := Label.new()
+	title.text = "ON THE ROAD TO " + n.name
+	title.position = Vector2(0, 66)
+	title.size = Vector2(640, 20)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", ui_font)
+	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_color_override("font_color", Color(1.8, 0.5, 0.5))
+	layer.add_child(title)
+	var body := Label.new()
+	body.text = ev.t
+	body.position = Vector2(70, 100)
+	body.size = Vector2(500, 60)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_theme_font_override("font", ui_font)
+	body.add_theme_font_size_override("font_size", 10)
+	body.add_theme_color_override("font_color", Color(0.9, 0.87, 0.9))
+	layer.add_child(body)
+	for oi in 2:
+		var opt: Array = ev.a if oi == 0 else ev.b
+		var btn := Button.new()
+		btn.text = opt[0]
+		btn.position = Vector2(150, 180 + oi * 44)
+		btn.size = Vector2(340, 28)
+		btn.add_theme_font_override("font", ui_font)
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.pressed.connect(func():
+			_apply_ev(opt[1])
+			in_event = false
+			layer.queue_free()
+			_launch(n))
+		layer.add_child(btn)
+
+func _apply_ev(fx: Dictionary) -> void:
+	Global.c_essence += fx.get("essence", 0.0)
+	Global.tribute += int(fx.get("tribute", 0))
+	Global.alert_discount = maxi(0, Global.alert_discount + int(fx.get("quiet", 0)))
+	if fx.get("relic", false):
+		var pool := RELICS.filter(func(r): return not r.id in Global.relics)
+		if not pool.is_empty():
+			var rl: Dictionary = pool[randi() % pool.size()]
+			Global.relics.append(rl.id)
+	ev_extra = {}
+	if fx.has("allies"):
+		ev_extra["allies_bonus"] = int(fx.allies)
+	if fx.has("threat"):
+		ev_extra["threat_bonus"] = float(fx.threat)
+	Global.save_crusade()
 
 func _obj_for(n: Dictionary) -> String:
 	# deterministic per (node, progress) so the map can promise what the battle delivers
@@ -81,8 +181,15 @@ func _obj_for(n: Dictionary) -> String:
 func _launch(n: Dictionary) -> void:
 	Global.map_pos = n.id
 	Global.city = n.get("city", ["kowloon", "thornspire", "ashport", "teotl", "maren"][randi() % 5])
-	var alert: int = Global.razed.size()
-	var params := {"map_node": n.id, "alert": alert, "kind": n.kind, "objective": _obj_for(n)}
+	var fate: String = Global.node_fates.get(str(n.id), "")
+	if fate == "quietroads":
+		Global.alert_discount += 1
+	var alert: int = maxi(0, Global.razed.size() - Global.alert_discount)
+	var params := {"map_node": n.id, "alert": alert, "kind": n.kind, "objective": _obj_for(n), "fate": fate}
+	if fate == "cultshrine":
+		params.allies_bonus = 2
+	params.merge(ev_extra, true)
+	ev_extra = {}
 	match n.kind:
 		"hamlet":
 			params.world_w = 2000.0
@@ -194,8 +301,12 @@ func _draw() -> void:
 			draw_line(n.pos + Vector2(-4, 4), n.pos + Vector2(4, -4), Color(0.9, 0.3, 0.2), 1.5)
 		draw_string(f, n.pos + Vector2(0, -r - 5), n.name, HORIZONTAL_ALIGNMENT_CENTER, -1, 7,
 			Color(0.9, 0.85, 0.8, 0.85))
-		# reachable nodes show what the war will ask of you
+		# reachable nodes show what the war will ask of you — and what the road carries
 		if _reachable(n.id) and n.kind in ["hamlet", "town", "city", "capital"]:
 			draw_string(f, n.pos + Vector2(0, r + 12), _obj_for(n).to_upper(),
 				HORIZONTAL_ALIGNMENT_CENTER, -1, 6, Color(1.5, 1.3, 0.7, 0.8))
+			var fate2: String = Global.node_fates.get(str(n.id), "")
+			if fate2 != "":
+				draw_string(f, n.pos + Vector2(0, r + 20), FATE_NAMES.get(fate2, ""),
+					HORIZONTAL_ALIGNMENT_CENTER, -1, 6, Color(1.2, 0.7, 1.5, 0.85))
 	draw_string(f, Vector2(320, 350), "choose where the ruin goes next", HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(0.7, 0.65, 0.7, 0.6))
