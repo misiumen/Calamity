@@ -135,6 +135,7 @@ var milestone_i := 0             # devour milestones fired
 var over_t := 0.0                # time since the end screen fell
 var fire_lights: Array = []      # pooled PointLight2D for blazes
 var flash_light: PointLight2D
+var flak_cd := 3.0
 var post_mat: ShaderMaterial
 var shock_p := 1.0               # screen ripple progress (>=1 idle)
 # --- essence: each god feeds on something different ---
@@ -146,6 +147,11 @@ var node_kind := "city"          # hamlet | town | city | capital
 var node_fate := ""              # act-2 road fate tag
 var node_militia := false        # act-1 early nodes: farmers, not armies
 var node_place := ""             # named settlement
+var lord_name := ""              # decapitation target
+var node_arch := "street"        # layout archetype
+var night_base := 0.12           # time-of-day roll
+var storm_node := false          # weather roll
+var plaza_x := -1.0
 var tier_cap := 5
 var objective := "raze"
 var obj_timer := 0.0
@@ -495,6 +501,15 @@ func _apply_campaign() -> void:
 	threat = float(p.get("alert", 0)) * 7.0
 	threat = minf(100.0, threat + float(p.get("threat_bonus", 0.0)))
 	is_capital = p.get("capital", false)
+	# per-node rolls: same province, different place
+	var nseed: int = int(p.get("map_node", 0)) * 31 + Global.razed.size() * 7
+	if node_kind in ["town", "city", "capital"]:
+		node_arch = ["street", "plaza", "garrison", "warrens"][nseed % 4]
+	night_base = [0.12, 0.32, 0.62][nseed % 3]
+	storm_node = nseed % 4 == 1
+	city_def = city_def.duplicate()
+	var tshift: float = 0.94 + float(nseed % 7) * 0.02
+	city_def.tint = Color(city_def.tint.r * tshift, city_def.tint.g * (2.0 - tshift) * 0.5 + city_def.tint.g * 0.5, city_def.tint.b * (1.88 - tshift * 0.94))
 	# the road's fate colors the battle
 	node_fate = p.get("fate", "")
 	node_militia = p.get("militia", false)
@@ -572,6 +587,8 @@ func _apply_campaign() -> void:
 	essence_start = essence_eaten
 	if objective == "decapitation":
 		obj_timer = 150.0
+		lord_name = ["BARON VELK", "DUKE MORRAINE", "MARSHAL KOTT", "LADY VESH",
+			"GOVERNOR HALE"][int(p.get("map_node", 0)) % 5]
 	if node_kind in ["hamlet", "town"]:
 		has_citadel = false
 		city_def = city_def.duplicate()
@@ -653,6 +670,15 @@ func _start_intro() -> void:
 	letterbox = 1.0
 	hud.msg.text = node_place if node_place != "" else city_def.get("name", Global.city.to_upper())
 	hud.sub.text = ARRIVE_LINES.get(character, "")
+	if Global.mode == "crusade":
+		hud.stats.text = {
+			"raze": "Leave nothing standing.",
+			"blackout": "SIEGEBREAK: the battery, the mast, the armory. Break all three.",
+			"extinction": "THE RECKONING: no survivors. They will run for the shelters. Crack them.",
+			"decapitation": lord_name + " rules here. End the bloodline before the army ends you.",
+			"terror": "Push them to LAST RESORT — then survive what falls.",
+			"feast": "Gorge before nightfall or starve in the dark.",
+		}.get(objective, "")
 	cam.position = Vector2(clampf(intro_from.x, 320.0, world_w - 320.0), -105)
 
 func _setup_prologue() -> void:
@@ -930,6 +956,9 @@ func _gen_lowrise(kind: String) -> Image:
 		"church":
 			w = randi_range(44, 56)
 			h = 92
+		"wall":
+			w = randi_range(16, 20)
+			h = randi_range(64, 76)
 		"school":
 			w = randi_range(70, 92)
 			h = randi_range(34, 42)
@@ -1116,13 +1145,20 @@ func _build_city() -> void:
 	var i := 0
 	# villages build bigger cottages — 26px shacks vanish at combat zoom
 	var vsc: float = 1.6 if node_kind in ["hamlet", "town", "prologue"] else 1.35
+	var arch_gap_mult: float = 0.45 if node_arch == "warrens" else 1.0
+	if node_arch == "plaza":
+		plaza_x = world_w * randf_range(0.4, 0.6)
 	while x < world_w - 620.0:
+		# the plaza: an open square in the city's heart
+		if plaza_x > 0.0 and x > plaza_x - 90.0 and x < plaza_x + 90.0:
+			x = plaza_x + 90.0
+			continue
 		var kind := _pick_kind()
 		if kind == "tower":
 			var f: Image = facades[i % facades.size()]
 			var sc: float = 2.0 if _hash(x) < city_def.big_chance and f.get_height() < 150 else 1.0
 			buildings.append(_mk_building(x, f, sc, false, "tower"))
-			x += f.get_width() * sc + randf_range(city_def.gap_min, city_def.gap_max)
+			x += f.get_width() * sc + randf_range(city_def.gap_min, city_def.gap_max) * arch_gap_mult
 			i += 1
 		elif kind == "house":
 			# houses come in rows — artist houses when the city has them
@@ -1134,11 +1170,11 @@ func _build_city() -> void:
 					hi = house_imgs[randi() % house_imgs.size()]
 				buildings.append(_mk_building(x, hi, vsc, false, "house"))
 				x += hi.get_width() * vsc + randf_range(4, 10)
-			x += randf_range(city_def.gap_min, city_def.gap_max)
+			x += randf_range(city_def.gap_min, city_def.gap_max) * arch_gap_mult
 		else:
 			var li := _gen_lowrise(kind)
 			buildings.append(_mk_building(x, li, vsc, false, kind))
-			x += li.get_width() * vsc + randf_range(city_def.gap_min, city_def.gap_max)
+			x += li.get_width() * vsc + randf_range(city_def.gap_min, city_def.gap_max) * arch_gap_mult
 	# citadel: biggest facade at 2x
 	var big_i := 0
 	for j in facades.size():
@@ -1156,13 +1192,40 @@ func _build_city() -> void:
 		if not buildings[bi].cit and buildings[bi].w > 40.0:
 			candidates.append(bi)
 	candidates.shuffle()
-	var specials := ["barracks", "comms", "fuel"]
+	var specials := ["aa", "comms", "barracks"]
 	for si in mini(n_specials, candidates.size()):
 		buildings[candidates[si]].special = specials[si]
 		specials_total += 1
+	# one landmark per node — the place worth remembering, and razing
+	if node_kind in ["town", "city", "capital"] and buildings.size() > 4:
+		var lm: Array = {"thornspire": ["church", "THE CATHEDRAL"], "teotl": ["ziggurat", "THE GREAT ZIGGURAT"],
+			"maren": ["warehouse", "THE FISH EXCHANGE"], "ashport": ["mall", "THE GASWORKS"],
+			"kowloon": ["mall", "THE ARCOLOGY"]}.get(Global.city, ["church", "THE OLD CATHEDRAL"])
+		var lmb2 := _mk_building(buildings[buildings.size() / 2].x + 20.0, _gen_lowrise(lm[0]), 2.4, false, lm[0])
+		lmb2.landmark_name = lm[1]
+		buildings.append(lmb2)
+	# garrison: stone gate-walls stand at the approaches
+	if node_arch == "garrison":
+		for wx4 in [world_w * 0.3, world_w * 0.72]:
+			var wall := _mk_building(wx4, _gen_lowrise("wall"), 1.0, false, "wall")
+			buildings.append(wall)
+			for gi in 3:
+				units.append({"kind": "police", "pos": Vector2(wx4 + randf_range(-20, 30), 0),
+					"cd": randf_range(0.5, 1.5), "hp": 1})
 	for b in buildings:
 		total_mass += b.maxhp
 	people_total = 130 if node_kind in ["city", "capital"] else 80
+	# the reckoning: mark two shelters the crowds will run to
+	if objective == "extinction":
+		var scand: Array = []
+		for bi2 in buildings.size():
+			var bb: Dictionary = buildings[bi2]
+			if not bb.cit and bb.get("special", "") == "" and bb.w > 30.0:
+				scand.append(bb)
+		scand.shuffle()
+		for si2 in mini(2, scand.size()):
+			scand[si2].shelter = true
+			scand[si2].inside = 0
 	if node_fate == "refugees":
 		people_total = int(people_total * 1.6)
 	# destructible street furniture
@@ -1202,6 +1265,11 @@ func _build_city() -> void:
 	var hotspots: Array = []
 	for hs in 9:
 		hotspots.append(randf_range(340.0, world_w - 360.0))
+	if plaza_x > 0.0:
+		hotspots[0] = plaza_x
+		hotspots[1] = plaza_x + 20.0
+		for st in 4:
+			props.append({"x": plaza_x + (st - 1.5) * 26.0, "tex": prop_texs[randi() % prop_texs.size()], "dead": false})
 	for k in people_total:
 		var px5: float
 		if k % 2 == 0:
@@ -1474,6 +1542,17 @@ func _process(delta: float) -> void:
 			if c.x < 300.0 or c.x > world_w - 330.0:
 				c.vx = -c.vx
 		# the void's answer arrives mid-war
+		# the AA battery contests the sky while it stands
+		flak_cd -= delta
+		if flak_cd <= 0.0 and pos.y < -70.0 and _aa_alive():
+			flak_cd = 2.6
+			var fp := pos + Vector2(randf_range(-26, 26), randf_range(-22, 22))
+			parts.append({"pos": fp, "vel": Vector2.ZERO, "life": 0.3, "col": Color(1.9, 1.4, 0.7), "flash": true, "size": 10.0})
+			_boom(fp, 8, Color(0.6, 0.55, 0.5), 70.0)
+			_sfx("boom")
+			if fp.distance_to(pos) < 20.0:
+				hp -= 5.0 * dmg_taken_mult
+				hit_flash = 0.7
 		if herald_due != "" and not herald_alive:
 			herald_timer -= delta
 			if herald_timer <= 0.0:
@@ -1750,7 +1829,25 @@ func _people(delta: float) -> void:
 		if blackout_t > 0.0:
 			p.panic = true   # the sun is gone — everyone runs
 		if p.panic:
-			p.vx = move_toward(p.vx, -signf(d) * 46.0, 200.0 * delta)
+			if objective == "extinction":
+				# they run for the shelters — hunt the convoys, crack the doors
+				var sb = null
+				var sd := 1e9
+				for b in buildings:
+					if b.get("shelter", false) and not b.dead and b.dying <= 0.0:
+						var dsx: float = absf(b.x + b.w * 0.5 - p.pos.x)
+						if dsx < sd:
+							sd = dsx
+							sb = b
+				if sb != null:
+					p.vx = move_toward(p.vx, signf(sb.x + sb.w * 0.5 - p.pos.x) * 52.0, 200.0 * delta)
+					if sd < 6.0:
+						p.dead = true
+						sb.inside = sb.get("inside", 0) + 1
+				else:
+					p.vx = move_toward(p.vx, -signf(d) * 46.0, 200.0 * delta)
+			else:
+				p.vx = move_toward(p.vx, -signf(d) * 46.0, 200.0 * delta)
 		else:
 			p.vx = sin(t * 0.6 + p.o) * 9.0
 		p.pos.x = clampf(p.pos.x + p.vx * delta, 300, world_w - 320)
@@ -3025,8 +3122,25 @@ func _collapse(b: Dictionary) -> void:
 			"life": randf_range(1.3, 2.2), "col": Color(0.72, 0.7, 0.78), "bird": true})
 	_shockripple(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.4))
 	_gout(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.4), "mass", minf(26.0, b.maxhp * 0.05), 5)
+	# named payoffs: the lord's keep and the province landmark
+	var bcx: float = b.x + b.w * 0.5
+	if b.cit and lord_name != "":
+		_pop(Vector2(bcx, -b.h - 40), lord_name + " IS DEAD — THE CITY IS HEADLESS", Color(2.2, 1.7, 0.6))
+		for i in 8:
+			people.append({"pos": Vector2(clampf(bcx + randf_range(-30, 30), 310.0, world_w - 330.0), 0),
+				"vx": 0.0, "panic": true, "o": randf() * TAU, "col": Color(0.8, 0.6, 0.9)})
+		people_total += 8
+	if b.get("landmark_name", "") != "":
+		_pop(Vector2(bcx, -b.h - 40), "THE " + str(b.landmark_name) + " FALLS", Color(1.8, 1.5, 2.0))
+		score_f += 8000.0 * combo
+		_gout(Vector2(bcx, -b.cur_h * 0.5), "mass", 30.0, 8)
 	if b.cit:
 		impact_frames = 3
+	if b.get("shelter", false) and b.get("inside", 0) > 0:
+		_pop(Vector2(b.x + b.w * 0.5, -b.cur_h - 24), "THE SHELTER CRACKS — %d SOULS" % b.inside, Color(2.0, 0.6, 0.5))
+		score_f += b.inside * 60.0 * combo * TIER_MULT[tier]
+		_gout(Vector2(b.x + b.w * 0.5, -10.0), "flesh", b.inside * 1.2, 6)
+		b.inside = 0
 	# the crowd beneath does not escape
 	for pe in people:
 		if pe.pos.x > b.x - 12.0 and pe.pos.x < b.x + b.w + 12.0:
@@ -3080,14 +3194,22 @@ func _collapse(b: Dictionary) -> void:
 		"mall":
 			_sfx("glass")
 	match b.get("special", ""):
+		"aa":
+			_pop(Vector2(cx, -b.h - 26), "AA BATTERY DOWN — THE SKY IS YOURS", Color(0.6, 1.8, 2.2))
+			score_f += 2000.0 * combo
+			for u in units:
+				if u.kind == "jet":
+					u.dead = true
 		"barracks":
 			city_def = city_def.duplicate()
 			city_def.spawn_mult *= 0.55
-			_pop(Vector2(cx, -b.h - 26), "BARRACKS DESTROYED — reinforcements falter", Color(2.0, 0.9, 0.4))
+			_pop(Vector2(cx, -b.h - 26), "THE ARMORY BURNS — THEIR STEEL IS ASH", Color(2.0, 0.9, 0.4))
 			score_f += 2000.0 * combo
 		"comms":
 			threat_mult = 0.5
-			_pop(Vector2(cx, -b.h - 26), "COMMS TOWER DOWN — the alarm slows", Color(0.5, 1.6, 2.0))
+			city_def = city_def.duplicate()
+			city_def.spawn_mult *= 0.7
+			_pop(Vector2(cx, -b.h - 26), "RADIO MAST DOWN — REINFORCEMENTS FALTER", Color(0.5, 1.6, 2.0))
 			score_f += 2000.0 * combo
 		"fuel":
 			_flash(Vector2(cx, -30.0), 3.0)
@@ -3597,6 +3719,12 @@ class DraftUI extends Control:
 			draw_string(f, Vector2(r.position.x, r.position.y + r.size.y - 10), "[%d]" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 7, Color(0.6, 0.55, 0.7))
 		draw_string(f, Vector2(0, 348), "1 / 2 / 3 or click - the unpicked wither away", HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(0.6, 0.55, 0.7))
 
+func _aa_alive() -> bool:
+	for b in buildings:
+		if b.get("special", "") == "aa" and not b.dead and b.dying <= 0.0 and b.topple == 0.0:
+			return true
+	return false
+
 func _kill_unit(u: Dictionary) -> void:
 	var base: int
 	match u.kind:
@@ -3976,11 +4104,18 @@ func _eaten_frac() -> float:
 		eaten += b.maxhp if (b.dead or b.dying > 0.0 or b.topple > 0.0) else (b.maxhp - b.hp)
 	return eaten / total_mass
 
+func _inside_alive() -> int:
+	var n := 0
+	for b in buildings:
+		if b.get("shelter", false) and not b.dead and b.dying <= 0.0:
+			n += b.get("inside", 0)
+	return n
+
 func _check_end() -> void:
 	if prologue:
 		return
 	var et: Dictionary = END_TEXT[character]
-	people_killed = people_total - people.size()
+	people_killed = people_total - people.size() - _inside_alive()
 	# bonus dare tracking
 	match bonus_obj:
 		"untouchable": bonus_met = hits_taken <= 3
@@ -4277,9 +4412,9 @@ func _hud_update() -> void:
 	hud.city.size.x = 152.0 * minf(1.0, _eaten_frac() / 0.9)
 	if Global.mode == "crusade" and not prologue:
 		match objective:
-			"decapitation": hud.obj.text = "OBJECTIVE: TOPPLE THE CITADEL — %ds" % int(maxf(0, obj_timer))
-			"extinction": hud.obj.text = "OBJECTIVE: EXTINCTION — %d / %d" % [people_killed, int(people_total * 0.85)]
-			"blackout": hud.obj.text = "OBJECTIVE: BLACKOUT — landmarks %d / %d" % [specials_down, specials_total]
+			"decapitation": hud.obj.text = "OBJECTIVE: %s — %ds" % [lord_name if lord_name != "" else "THE CITADEL", int(maxf(0, obj_timer))]
+			"extinction": hud.obj.text = "THE RECKONING — %d / %d souls" % [people_killed, int(people_total * 0.85)]
+			"blackout": hud.obj.text = "SIEGEBREAK — installations %d / %d" % [specials_down, specials_total]
 			"terror": hud.obj.text = ("OBJECTIVE: SURVIVE — %ds" % int(maxf(0, obj_timer))) if obj_started else "OBJECTIVE: TERROR — reach LAST RESORT"
 			"feast": hud.obj.text = "OBJECTIVE: FEAST — %d / 250 before nightfall" % int(essence_eaten - essence_start)
 			_: hud.obj.text = "OBJECTIVE: RAZE — devour 90%% or the citadel"
@@ -4396,7 +4531,8 @@ func _draw() -> void:
 		var wp := Vector2(left + fposmod(am.p.x, right - left), am.p.y)
 		draw_rect(Rect2(wp.x, wp.y, 1.2, 1.2), Color(ash_c.r * 0.5, ash_c.g * 0.45, ash_c.b * 0.4, 0.25 * am.s))
 	# weather — each city has its own sky-mood
-	match Global.city:
+	var wcity: String = "maren" if storm_node else Global.city
+	match wcity:
 		"maren":
 			for i in 46:
 				var si: float = _hash(float(i))
@@ -4690,6 +4826,19 @@ func _draw_building(b: Dictionary) -> void:
 	var dmg: float = 1.0 - b.hp / b.maxhp
 	if dmg > 0.45 and randf() < 0.25:
 		_fire(Vector2(b.x + randf() * b.w, -b.cur_h + randf() * b.cur_h * 0.4))
+	var spname: String = {"aa": "AA BATTERY", "comms": "RADIO MAST", "barracks": "ARMORY",
+		"fuel": "FUEL DEPOT"}.get(b.get("special", ""), "")
+	if spname != "":
+		var spy: float = -b.cur_h - 12.0
+		draw_string(ui_font, Vector2(b.x + b.w * 0.5 - 60, spy), spname, HORIZONTAL_ALIGNMENT_CENTER, 120, 6,
+			Color(1.7, 1.5, 0.7, 0.75 + 0.25 * sin(t * 4.0)))
+		if objective == "blackout":
+			draw_colored_polygon(PackedVector2Array([Vector2(b.x + b.w * 0.5 - 3, spy - 12),
+				Vector2(b.x + b.w * 0.5 + 3, spy - 12), Vector2(b.x + b.w * 0.5, spy - 7)]),
+				Color(2.0, 1.6, 0.5, 0.6 + 0.3 * sin(t * 5.0)))
+	if b.get("landmark_name", "") != "" and not b.dead:
+		draw_string(ui_font, Vector2(b.x + b.w * 0.5 - 70, -b.cur_h - 10), b.landmark_name,
+			HORIZONTAL_ALIGNMENT_CENTER, 140, 6, Color(1.4, 1.2, 1.6, 0.6))
 	if b.cit:
 		var cp := Vector2(b.x + b.w * 0.5, -b.cur_h - 8)
 		draw_circle(cp, 5, Color(2.0, 1.6, 0.5, 0.25))
