@@ -26,7 +26,7 @@ const CITY_DEFS := {
 		"facade_sheet": "res://art/cities/thornspire/church-slabs.png",
 		"house_art": ["res://art/cities/thornspire/house-a.png", "res://art/cities/thornspire/house-b.png", "res://art/cities/thornspire/house-c.png"],
 		"far_tex": "res://art/cities/thornspire/background.png", "mid_tex": "res://art/cities/thornspire/middleground.png",
-		"far_scale": 0.8, "mid_scale": 0.85},
+		"far_scale": 0.5, "mid_scale": 0.36},
 	"teotl": {"name": "TEOTL RUINS", "tint": Color(0.9, 1.05, 0.85), "defense": 0.9,
 		"sky": [Color("#04100c"), Color("#0a241a"), Color("#124532"), Color("#1e6a42"), Color("#37945a")],
 		"big_chance": 0.2, "gap_min": 26.0, "gap_max": 80.0, "spawn_mult": 0.9,
@@ -35,7 +35,7 @@ const CITY_DEFS := {
 		"mix": {"ziggurat": 0.26, "shrine": 0.34, "house": 0.4},
 		"facade_sheet": "res://art/near-buildings-bg.png", "house_art": [],
 		"far_tex": "res://art/cities/teotl/back.png", "mid_tex": "res://art/cities/teotl/middle.png",
-		"far_scale": 0.55, "mid_scale": 0.6, "cit_kind": "ziggurat"},
+		"far_scale": 0.55, "mid_scale": 0.7, "mid_hang": true, "cit_kind": "ziggurat"},
 	"maren": {"name": "PORT MAREN", "tint": Color(0.85, 0.95, 1.1), "defense": 1.1,
 		"sky": [Color("#0a0e16"), Color("#131c2c"), Color("#22344a"), Color("#3a566a"), Color("#587a8a")],
 		"big_chance": 0.2, "gap_min": 18.0, "gap_max": 60.0, "spawn_mult": 1.2,
@@ -369,6 +369,7 @@ func _setup_sfx() -> void:
 	sfx_bank["chirp"] = _synth_mix(0.25, [[26.0, 2300.0, 0.95, 0.22, 0.0], [30.0, 2600.0, 0.9, 0.15, 0.09]])
 	sfx_bank["clank"] = _synth_mix(0.6, [[13.0, 260.0, 0.7, 0.3, 0.0], [22.0, 410.0, 0.6, 0.2, 0.12]])
 	sfx_bank["horn"] = _synth_mix(1.1, [[2.6, 186.0, 0.85, 0.26, 0.0], [2.6, 140.0, 0.8, 0.18, 0.05]])
+	sfx_bank["scream"] = _synth_mix(0.8, [[5.0, 920.0, 0.9, 0.2, 0.0], [7.0, 1180.0, 0.85, 0.12, 0.1]])
 	amb_player = AudioStreamPlayer.new()
 	amb_player.volume_db = -20.0
 	add_child(amb_player)
@@ -846,7 +847,14 @@ func _slice_facades() -> void:
 					if not row_empty:
 						top = yy
 						break
-				facades.append(strip.get_region(Rect2i(0, top, strip.get_width(), h - top)))
+				var cut := strip.get_region(Rect2i(0, top, strip.get_width(), h - top))
+				if cut.get_width() > 96:
+					var nseg: int = int(ceil(cut.get_width() / 72.0))
+					var segw: int = cut.get_width() / nseg
+					for sgi in nseg:
+						facades.append(cut.get_region(Rect2i(sgi * segw, 0, segw, cut.get_height())))
+				else:
+					facades.append(cut)
 			run_start = -1
 	tex_sky_a = load(city_def.far_tex)
 	tex_sky_b = load("res://art/skyline-b.png")   # only used by kowloon's alternating far layer
@@ -1078,12 +1086,12 @@ func _build_city() -> void:
 	var x := 380.0
 	var i := 0
 	# villages build bigger cottages — 26px shacks vanish at combat zoom
-	var vsc: float = 1.6 if node_kind in ["hamlet", "town", "prologue"] else 1.0
+	var vsc: float = 1.6 if node_kind in ["hamlet", "town", "prologue"] else 1.35
 	while x < world_w - 620.0:
 		var kind := _pick_kind()
 		if kind == "tower":
 			var f: Image = facades[i % facades.size()]
-			var sc: float = 2.0 if _hash(x) < city_def.big_chance else 1.0
+			var sc: float = 2.0 if _hash(x) < city_def.big_chance and f.get_height() < 150 else 1.0
 			buildings.append(_mk_building(x, f, sc, false, "tower"))
 			x += f.get_width() * sc + randf_range(city_def.gap_min, city_def.gap_max)
 			i += 1
@@ -1125,7 +1133,9 @@ func _build_city() -> void:
 		specials_total += 1
 	for b in buildings:
 		total_mass += b.maxhp
-	people_total = 112 if node_fate == "refugees" else 70
+	people_total = 130 if node_kind in ["city", "capital"] else 80
+	if node_fate == "refugees":
+		people_total = int(people_total * 1.6)
 	# destructible street furniture
 	for pn in ["control-box-1", "control-box-2", "control-box-3", "monitor-face-1"]:
 		prop_texs.append(load("res://art/props/%s.png" % pn))
@@ -1153,13 +1163,23 @@ func _build_city() -> void:
 			flood.append({"x0": fx0, "x1": fx0 + randf_range(80, 180), "t_left": 1e9, "neutral": true})
 	for k in 26:
 		cars.append({"x": randf_range(300, world_w - 400), "w": randf_range(14, 19), "dead": false,
+			"vx": (randf_range(24.0, 44.0) * (-1.0 if randf() < 0.5 else 1.0)) if randf() < 0.45 else 0.0,
 			"col": [Color("#20303a"), Color("#3a2030"), Color("#2a2a34"), Color("#1c2426")][randi() % 4]})
 	var lamp_x := 320.0
 	while lamp_x < world_w - 300.0:
 		lamps.append({"x": lamp_x, "dead": false})
 		lamp_x += randf_range(80, 120)
+	# crowds gather where crowds gather — markets, stops, plazas
+	var hotspots: Array = []
+	for hs in 9:
+		hotspots.append(randf_range(340.0, world_w - 360.0))
 	for k in people_total:
-		people.append({"pos": Vector2(randf_range(320, world_w - 350), 0), "vx": 0.0, "panic": false,
+		var px5: float
+		if k % 2 == 0:
+			px5 = hotspots[k % hotspots.size()] + randf_range(-36.0, 36.0)
+		else:
+			px5 = randf_range(320.0, world_w - 350.0)
+		people.append({"pos": Vector2(clampf(px5, 320.0, world_w - 350.0), 0), "vx": 0.0, "panic": false,
 			"o": randf() * TAU, "col": Color(randf_range(0.4, 0.7), randf_range(0.4, 0.6), randf_range(0.5, 0.75))})
 
 func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "tower") -> Dictionary:
@@ -1408,6 +1428,20 @@ func _process(delta: float) -> void:
 			if absf(bus.x - cam.position.x) > 900.0:
 				bus.dead = true
 		buses = buses.filter(func(bus): return not bus.get("dead", false))
+		# traffic drives until terror stops it — then the gridlock honks
+		for c in cars:
+			if c.get("dead", false) or c.get("gone", false) or c.get("vx", 0.0) == 0.0:
+				continue
+			if absf(c.x + c.w * 0.5 - pos.x) < 180.0 or threat > 45.0:
+				c.vx = 0.0
+				if randf() < 0.35 and amb_player != null and sfx_bank.has("horn"):
+					amb_player.stream = sfx_bank["horn"]
+					amb_player.pitch_scale = randf_range(1.3, 1.9)
+					amb_player.play()
+				continue
+			c.x += c.vx * delta
+			if c.x < 300.0 or c.x > world_w - 330.0:
+				c.vx = -c.vx
 		# the void's answer arrives mid-war
 		if herald_due != "" and not herald_alive:
 			herald_timer -= delta
@@ -1560,7 +1594,7 @@ func _process(delta: float) -> void:
 		parts = parts.slice(parts.size() - MAX_PARTS)
 	for p in parts:
 		p.pos += p.vel * delta
-		if not p.get("fire", false):
+		if not p.get("fire", false) and not p.get("bird", false):
 			p.vel.y += 300.0 * delta
 		p.life -= delta
 		# debris chunks bounce off the street
@@ -1651,6 +1685,10 @@ func _people(delta: float) -> void:
 			afraid += 1
 	if afraid > 0:
 		_feed("fear", afraid * 0.12 * delta)
+		if afraid > 12 and randf() < 0.015 and amb_player != null and sfx_bank.has("scream"):
+			amb_player.stream = sfx_bank["scream"]
+			amb_player.pitch_scale = randf_range(0.85, 1.25)
+			amb_player.play()
 	people = people.filter(func(p): return not p.get("dead", false))
 	# critters scatter
 	for cr in critters:
@@ -2889,6 +2927,11 @@ func _collapse(b: Dictionary) -> void:
 	b.dying = 0.28
 	b.smolder = t + 40.0
 	buildings_razed += 1
+	# the rooftop birds explode into the sky
+	for i in 6:
+		parts.append({"pos": Vector2(b.x + randf() * b.w, -b.cur_h - 2.0),
+			"vel": Vector2(randf_range(-45, 45), randf_range(-60, -30)),
+			"life": randf_range(1.3, 2.2), "col": Color(0.72, 0.7, 0.78), "bird": true})
 	_shockripple(Vector2(b.x + b.w * 0.5, -b.cur_h * 0.4))
 	if b.cit:
 		impact_frames = 3
@@ -4221,17 +4264,22 @@ func _draw_backdrop(left: float, right: float, cx: float) -> void:
 		xi += sw
 		k += 1
 	draw_rect(Rect2(left, -sh, right - left, sh), Color(0.12, 0.08, 0.24, 0.45))
-	# mid layer: taller, closer, clearer
+	# haze band separates the layers — distance you can feel
+	draw_rect(Rect2(left, -sh * 0.7, right - left, sh * 0.7), Color(0.5, 0.3, 0.45, 0.10))
+	# mid layer: taller, closer, clearer (or a canopy hanging from the sky)
 	var mw: float = tex_mid.get_width() * city_def.mid_scale
 	var mh: float = tex_mid.get_height() * city_def.mid_scale
+	var hang: bool = city_def.get("mid_hang", false)
+	var mtop: float = (cam.position.y - 190.0 / cam.zoom.y - mh * 0.45) if hang else -mh
 	f = 0.4
 	xoff = -cx * f
 	start = floor((left - xoff) / mw) * mw + xoff
 	xi = start
 	while xi < right:
-		draw_texture_rect(tex_mid, Rect2(xi, -mh, mw, mh), false, Color(0.55, 0.48, 0.75, 1))
+		draw_texture_rect(tex_mid, Rect2(xi, mtop, mw, mh), false, Color(0.55, 0.48, 0.75, 1))
 		xi += mw
-	draw_rect(Rect2(left, -mh, right - left, mh), Color(0.1, 0.06, 0.2, 0.35))
+	if not hang:
+		draw_rect(Rect2(left, -mh, right - left, mh), Color(0.1, 0.06, 0.2, 0.35))
 
 func _draw_building(b: Dictionary) -> void:
 	if b.dead:
@@ -4279,6 +4327,9 @@ func _draw_building(b: Dictionary) -> void:
 		tint = tint * Color(0.45, 0.42, 0.55)
 	elif night_f < 1.0:
 		tint = tint * Color(1, 1, 1).lerp(Color(1.14, 1.02, 0.88), 1.0 - night_f)
+	# fear turns the lights down, street by street
+	var fearf: float = minf(0.20, threat * 0.002) * _hash(b.seed + 3.0)
+	tint = tint * Color(1.0 - fearf, 1.0 - fearf, 1.0 - fearf * 0.7)
 	draw_texture_rect_region(b.tex, Rect2(b.x, -b.cur_h, b.w, b.cur_h), src, tint)
 	# anchored flames — fire lives ON the building
 	if b.burn > 0.2:
@@ -4592,6 +4643,10 @@ func _draw_actors() -> void:
 			draw_arc(p.pos, maxf(1.0, rr2 * 0.8), 0, TAU, 40, Color(p.col.r, p.col.g, p.col.b, a * 0.25), 4.0)
 		elif p.get("flash", false):
 			draw_circle(p.pos, p.size * (1.0 + (0.22 - p.life) * 8.0), Color(p.col.r, p.col.g, p.col.b, a * 0.7))
+		elif p.get("bird", false):
+			var wf3: float = 2.5 if fmod(p.life * 9.0, 2.0) < 1.0 else 0.5
+			draw_line(p.pos + Vector2(-3, -wf3), p.pos, Color(p.col.r, p.col.g, p.col.b, a), 1.0)
+			draw_line(p.pos, p.pos + Vector2(3, -wf3), Color(p.col.r, p.col.g, p.col.b, a), 1.0)
 		elif p.get("fire", false) and not p.get("smoke", false):
 			# real flame: glow + tongue that flickers and tapers as it dies
 			var fl: float = p.life
@@ -4973,81 +5028,76 @@ func _draw_drowned() -> void:
 	var facing: float = signf(aim.x - pos.x)
 	if facing == 0.0:
 		facing = 1.0
-	# ============ THE DROWNED ONE: a standing wall of black water ============
-	var g: float = 2.0 * growth
-	var o: Vector2 = pos
-	var H: float = 44.0 * g          # the column towers
-	var W: float = 15.0 * g
-	# outer veil — translucent water, edges alive
-	var veil := PackedVector2Array()
-	veil.append(o + Vector2(-W * 1.5, 0))
-	for i in 7:
-		var f: float = float(i) / 6.0
-		veil.append(o + Vector2(-W * (1.4 - f * 0.75) + sin(t * 1.7 + f * 6.0) * 3.0, -H * (0.1 + f * 0.95)))
-	for i in 7:
-		var f2: float = float(i) / 6.0
-		veil.append(o + Vector2(W * (0.65 + f2 * 0.75) + sin(t * 1.4 + f2 * 5.0 + 2.0) * 3.0, -H * (1.05 - f2 * 0.95)))
-	veil.append(o + Vector2(W * 1.5, 0))
-	draw_colored_polygon(veil, Color(0.10, 0.30, 0.34, 0.5))
-	# mid water — darker, narrower
-	var mid := PackedVector2Array()
-	mid.append(o + Vector2(-W * 1.1, 0))
-	for i in 6:
-		var f3: float = float(i) / 5.0
-		mid.append(o + Vector2(-W * (1.0 - f3 * 0.5) + sin(t * 2.1 + f3 * 7.0) * 2.5, -H * (0.12 + f3 * 0.9)))
-	for i in 6:
-		var f4: float = float(i) / 5.0
-		mid.append(o + Vector2(W * (0.5 + f4 * 0.5) + sin(t * 1.8 + f4 * 6.0 + 1.0) * 2.5, -H * (1.02 - f4 * 0.9)))
-	mid.append(o + Vector2(W * 1.1, 0))
-	draw_colored_polygon(mid, Color(0.06, 0.20, 0.24, 0.85))
-	# the god inside — a shadow with shoulders, seen through the water
-	var shd := PackedVector2Array([
-		o + Vector2(-W * 0.62, 0), o + Vector2(-W * 0.66, -H * 0.45),
-		o + Vector2(-W * 0.5, -H * 0.68), o + Vector2(-W * 0.28, -H * 0.8),
-		o + Vector2(-W * 0.16, -H * 0.94), o + Vector2(W * 0.16, -H * 0.94),
-		o + Vector2(W * 0.28, -H * 0.8), o + Vector2(W * 0.5, -H * 0.68),
-		o + Vector2(W * 0.66, -H * 0.45), o + Vector2(W * 0.62, 0)])
-	draw_colored_polygon(shd, Color(0.015, 0.06, 0.08, 0.92))
-	# TENTACLES — rising and curling around the column
-	for tn in 4:
-		var side: float = -1.0 if tn % 2 == 0 else 1.0
-		var ph: float = t * 0.9 + tn * 1.9
-		var base := o + Vector2(side * W * (0.9 + tn * 0.14), 0)
-		var prev := base
-		var th: float = 3.4 * g * 0.5
-		for s in 7:
-			var f5: float = float(s + 1) / 7.0
-			var npt := base + Vector2(side * (sin(ph + f5 * 3.4) * 9.0 + f5 * 10.0) * g * 0.35,
-				-H * f5 * (0.5 + 0.12 * sin(ph * 0.7)) - sin(ph + f5 * 5.0) * 4.0)
-			draw_line(prev, npt, Color(0.05, 0.17, 0.2), th * (1.0 - f5 * 0.75) + 1.2)
-			prev = npt
-		draw_circle(prev, 1.6, Color(0.14, 0.4, 0.42))
-	# kelp crown — thin strands off the head, streaming
-	for k in 5:
-		var kb := o + Vector2((k - 2) * 2.4 * g * 0.4, -H * 0.94)
-		draw_line(kb, kb + Vector2((k - 2) * 3.0 + sin(t * 2.0 + k) * 4.0, -7.0 * g * 0.4 - (k % 3) * 3.0),
-			Color(0.08, 0.22, 0.2), 1.0)
-	# THE EYES — the only light it owes anyone
-	var ey := o + Vector2(facing * W * 0.1, -H * 0.82)
-	var blink: float = 0.0 if fmod(t, 6.0) < 5.8 else 1.0
-	if blink < 0.5:
-		for side2 in [-1.0, 1.0]:
-			var ep := ey + Vector2(side2 * W * 0.16, 0)
-			draw_circle(ep, 8.0, Color(0.5, 1.4, 1.3, 0.10))
-			draw_circle(ep, 3.4, Color(0.5, 1.4, 1.3, 0.30))
-			draw_circle(ep, 1.7, Color(1.3, 2.4, 2.2))
-	# foam skirt at the waterline + constant falling water
-	for fm in 8:
-		var fx := o.x + (fm - 3.5) * W * 0.36 + sin(t * 3.0 + fm) * 3.0
-		draw_circle(Vector2(fx, -1.5 + sin(t * 5.0 + fm * 2.0) * 1.2), 2.4 + (fm % 3), Color(0.55, 0.85, 0.85, 0.20))
-	if randf() < 0.5:
-		parts.append({"pos": o + Vector2(randf_range(-W, W), -randf_range(H * 0.3, H * 0.9)),
-			"vel": Vector2(randf_range(-3, 3), randf_range(30, 60)), "life": randf_range(0.3, 0.7),
-			"col": Color(0.4, 0.8, 0.85, 0.55), "size": 1.3})
+	_drowned_priest(facing)
 	# the bay follows him — fish leap in his wake
 	if randf() < 0.06:
 		parts.append({"pos": pos + Vector2(randf_range(-60, 60), -2), "vel": Vector2(randf_range(-20, 20), randf_range(-95, -55)),
 			"life": 0.9, "col": Color(0.5, 0.95, 0.85), "size": 2.0})
+
+func _drowned_priest(facing: float) -> void:
+	# V1 — THE TIDE PRIEST: a hooded colossus, its face a fall of tentacles
+	var g: float = 2.9 * growth
+	var o: Vector2 = pos
+	var H: float = 38.0 * g
+	var sway: float = sin(t * 1.3) * 2.0
+	var DKW := Color(0.02, 0.08, 0.10)
+	var DKW2 := Color(0.04, 0.13, 0.15)
+	# the robe — one solid hooded silhouette, hem breaking into the sea
+	var robe := PackedVector2Array()
+	robe.append(o + Vector2(-13.0 * g * 0.5, 0))
+	robe.append(o + Vector2(-11.0 * g * 0.5 + sway * 0.4, -H * 0.35))
+	robe.append(o + Vector2(-14.0 * g * 0.5 + sway * 0.6, -H * 0.62))       # hunched shoulder L
+	robe.append(o + Vector2(-8.0 * g * 0.5 + sway, -H * 0.86))
+	robe.append(o + Vector2(-3.5 * g * 0.5 + sway, -H))                     # hood peak
+	robe.append(o + Vector2(3.5 * g * 0.5 + sway, -H * 0.98))
+	robe.append(o + Vector2(9.0 * g * 0.5 + sway, -H * 0.84))
+	robe.append(o + Vector2(15.0 * g * 0.5 + sway * 0.6, -H * 0.6))         # shoulder R
+	robe.append(o + Vector2(12.0 * g * 0.5 + sway * 0.4, -H * 0.33))
+	robe.append(o + Vector2(14.0 * g * 0.5, 0))
+	# ragged hem
+	for i in 6:
+		var f: float = 1.0 - float(i) / 5.0
+		robe.append(o + Vector2((14.0 - 28.0 * (1.0 - f)) * g * 0.5 * -1.0 + 28.0 * f * g * 0.5,
+			-fmod(sin((f + t * 0.1) * 23.0) * 4.0, 3.5) * g * 0.4))
+	draw_colored_polygon(robe, DKW)
+	var rim := robe.duplicate()
+	rim.append(robe[0])
+	draw_polyline(rim, Color(0.16, 0.45, 0.45, 0.6), 1.3)
+	# robe sheen folds
+	draw_circle(o + Vector2(sway - 3.0 * g * 0.5, -H * 0.5), 6.0 * g * 0.5, DKW2)
+	draw_circle(o + Vector2(sway + 5.0 * g * 0.5, -H * 0.42), 4.5 * g * 0.5, DKW2)
+	# barnacle clusters on the shoulders
+	for bc in [[-11.0, 0.64], [11.5, 0.62], [-6.0, 0.8]]:
+		var bp := o + Vector2(bc[0] * g * 0.5 + sway * 0.7, -H * bc[1])
+		draw_circle(bp, 1.8, Color(0.25, 0.5, 0.48))
+		draw_circle(bp + Vector2(2.0, 1.0), 1.1, Color(0.2, 0.42, 0.4))
+	# THE FACE — a hanging fall of tentacles where a face should be
+	var fc := o + Vector2(sway + facing * 1.0 * g * 0.5, -H * 0.84)
+	for tn in 7:
+		var tx0: float = (tn - 3.0) * 1.9 * g * 0.4
+		var ph: float = t * 1.6 + tn * 1.1
+		var prev := fc + Vector2(tx0, 1.0)
+		var tlen: float = (7.0 + (tn % 3) * 2.5 + 2.0 * sin(ph * 0.6)) * g * 0.45
+		for s in 4:
+			var f2: float = float(s + 1) / 4.0
+			var npt := fc + Vector2(tx0 + sin(ph + f2 * 2.6) * 2.6 * f2, 1.0 + tlen * f2)
+			draw_line(prev, npt, DKW2 if tn % 2 == 0 else Color(0.06, 0.18, 0.19), 2.6 * (1.0 - f2 * 0.6) + 0.8)
+			prev = npt
+	# eyes burning deep in the hood, above the tentacle-fall
+	for side in [-1.0, 1.0]:
+		var ep := fc + Vector2(side * 2.6 * g * 0.4, -3.2 * g * 0.4)
+		draw_circle(ep, 6.0, Color(0.5, 1.4, 1.3, 0.12))
+		draw_circle(ep, 2.2, Color(0.5, 1.4, 1.3, 0.35))
+		draw_circle(ep, 1.1, Color(1.3, 2.4, 2.2))
+	# water sheeting off the shoulders, foam at the hem
+	if randf() < 0.6:
+		var wside: float = -1.0 if randf() < 0.5 else 1.0
+		parts.append({"pos": o + Vector2(wside * randf_range(8.0, 13.0) * g * 0.5, -H * randf_range(0.55, 0.62)),
+			"vel": Vector2(wside * randf_range(2, 8), randf_range(35, 65)), "life": randf_range(0.35, 0.7),
+			"col": Color(0.4, 0.8, 0.85, 0.5), "size": 1.3})
+	for fm in 6:
+		var fx2: float = o.x + (fm - 2.5) * 5.0 * g * 0.5 + sin(t * 4.0 + fm * 1.7) * 2.0
+		draw_circle(Vector2(fx2, -1.0 + sin(t * 6.0 + fm) * 0.8), 2.0 + (fm % 2), Color(0.55, 0.85, 0.85, 0.22))
 
 func _draw_rider() -> void:
 	draw_circle(aim, 2.0, Color(1.6, 1.5, 0.7, 0.7))
