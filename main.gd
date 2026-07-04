@@ -204,10 +204,6 @@ func _ready() -> void:
 		for i in 16:
 			segs.append(pos)
 		_bake_serpent()
-	elif character == "drowned":
-		_bake_drowned()
-	elif character == "rider":
-		_bake_rider()
 	if Global.mode == "skirmish":
 		match Global.mutator:
 			"mobilization":
@@ -346,71 +342,6 @@ func _outline(img: Image, col: Color) -> void:
 					break
 			if edge:
 				img.set_pixel(x, y, col)
-
-func _bake_drowned() -> void:
-	var OUT := Color("#0a0e14")
-	var D1 := Color("#1c3a44")
-	var D2 := Color("#2e5a62")
-	var D3 := Color("#4a8a88")
-	var GL := Color("#b8e8d8")
-	# two frames: the beard sways, the mass breathes
-	for phase in 2:
-		var img := Image.create(36, 32, false, Image.FORMAT_RGBA8)
-		# hunched mass
-		for px in [[8, 6 + phase, 22, 20 - phase, D2], [10, 4 + phase, 16, 6, D2], [6, 12, 6, 12, D1],
-				[26, 10, 6, 14, D1], [12, 6 + phase, 14, 5, D3], [10, 24, 18, 4, D1]]:
-			img.fill_rect(Rect2i(px[0], px[1], px[2], px[3]), px[4])
-		# barnacle glints
-		for mp in [[13, 9], [20, 8], [24, 13], [11, 16], [17, 19]]:
-			img.set_pixel(mp[0], mp[1] + phase, D3)
-		# tentacle beard — alternating drift
-		for tb in 5:
-			var tx := 11 + tb * 4
-			img.fill_rect(Rect2i(tx + (phase if tb % 2 == 0 else 0), 22, 2, 7 + ((tb + phase) % 3) * 2), D1)
-			img.set_pixel(tx, 30, D2)
-		# eyes — a row of pale lights
-		for e in [[14, 11], [18, 10], [22, 11], [16, 14], [20, 14]]:
-			img.set_pixel(e[0], e[1] + phase, GL)
-		_outline(img, OUT)
-		if phase == 0:
-			tex_drowned = ImageTexture.create_from_image(img)
-		else:
-			tex_drowned_b = ImageTexture.create_from_image(img)
-
-func _bake_rider() -> void:
-	var OUT := Color("#0c0a0a")
-	var BONE := Color("#cfc4a4")
-	var BONE2 := Color("#eae0c4")
-	var SHRD := Color("#3a3430")   # shroud
-	var SHRD2 := Color("#57504a")
-	# two frames: legs gather and reach — a real gallop
-	for phase in 2:
-		var img := Image.create(34, 30, false, Image.FORMAT_RGBA8)
-		# gaunt horse: body, neck, skull head, legs
-		img.fill_rect(Rect2i(6, 14, 20, 6), BONE)
-		img.fill_rect(Rect2i(4, 15, 4, 4), BONE)
-		img.fill_rect(Rect2i(24, 10, 4, 6), BONE)   # neck
-		img.fill_rect(Rect2i(26, 8, 7, 4), BONE2)   # skull
-		img.set_pixel(31, 9, OUT)                   # eye socket
-		var legs: Array = [[8, 20, 9], [13, 20, 9], [19, 20, 9], [24, 20, 9]] if phase == 0 \
-			else [[6, 20, 8], [15, 20, 7], [17, 20, 8], [26, 20, 7]]
-		for leg in legs:
-			img.fill_rect(Rect2i(leg[0], leg[1], 2, leg[2]), BONE)
-		# ribs showing
-		for r in 3:
-			img.fill_rect(Rect2i(10 + r * 4, 15, 1, 4), BONE2)
-		# the rider: hooded shroud + scythe
-		img.fill_rect(Rect2i(12, 4, 8, 11), SHRD)
-		img.fill_rect(Rect2i(13, 2, 6, 4), SHRD2)   # hood
-		img.fill_rect(Rect2i(15, 4, 2, 1), Color(1.8, 1.5, 0.6))  # eye glow
-		img.fill_rect(Rect2i(20 + phase, 0, 1, 13), SHRD2)  # scythe haft
-		img.fill_rect(Rect2i(21 + phase, 0, 6, 2), BONE2)   # blade
-		img.set_pixel(26 + phase, 2, BONE2)
-		_outline(img, OUT)
-		if phase == 0:
-			tex_rider = ImageTexture.create_from_image(img)
-		else:
-			tex_rider_b = ImageTexture.create_from_image(img)
 
 func _setup_sfx() -> void:
 	for i in 10:
@@ -1835,10 +1766,6 @@ var scythe_t := 0.0
 var scythe_ang := 0.0
 var flood: Array = []            # water zones {x0, x1, t_left}
 var trail_cd := 0.0
-var tex_drowned: Texture2D
-var tex_drowned_b: Texture2D
-var tex_rider: Texture2D
-var tex_rider_b: Texture2D
 
 func _tendrils(delta: float) -> void:
 	bite_cd -= delta
@@ -5046,16 +4973,77 @@ func _draw_drowned() -> void:
 	var facing: float = signf(aim.x - pos.x)
 	if facing == 0.0:
 		facing = 1.0
-	# dripping aura
-	draw_circle(pos + Vector2(0, -12), 24.0, Color(0.2, 0.6, 0.7, 0.07))
-	if randf() < 0.15:
-		parts.append({"pos": pos + Vector2(randf_range(-14, 14), randf_range(-24, -4)), "vel": Vector2(0, 30),
-			"life": 0.5, "col": Color(0.4, 0.8, 0.9, 0.6), "size": 1.2})
-	draw_set_transform(pos + Vector2(0, 2), 0.0, Vector2(1.4 * facing * growth, 1.4 * growth))
-	draw_texture(tex_drowned if int(t * 3.0) % 2 == 0 else tex_drowned_b, Vector2(-18, -30), Color(1, 1, 1))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	# bob glow of the eye-lights
-	draw_circle(pos + Vector2(facing * 2.0, -16 + sin(t * 2.0) * 1.5), 6.0, Color(0.5, 1.2, 1.1, 0.10))
+	# ============ THE DROWNED ONE: a standing wall of black water ============
+	var g: float = 2.0 * growth
+	var o: Vector2 = pos
+	var H: float = 44.0 * g          # the column towers
+	var W: float = 15.0 * g
+	# outer veil — translucent water, edges alive
+	var veil := PackedVector2Array()
+	veil.append(o + Vector2(-W * 1.5, 0))
+	for i in 7:
+		var f: float = float(i) / 6.0
+		veil.append(o + Vector2(-W * (1.4 - f * 0.75) + sin(t * 1.7 + f * 6.0) * 3.0, -H * (0.1 + f * 0.95)))
+	for i in 7:
+		var f2: float = float(i) / 6.0
+		veil.append(o + Vector2(W * (0.65 + f2 * 0.75) + sin(t * 1.4 + f2 * 5.0 + 2.0) * 3.0, -H * (1.05 - f2 * 0.95)))
+	veil.append(o + Vector2(W * 1.5, 0))
+	draw_colored_polygon(veil, Color(0.10, 0.30, 0.34, 0.5))
+	# mid water — darker, narrower
+	var mid := PackedVector2Array()
+	mid.append(o + Vector2(-W * 1.1, 0))
+	for i in 6:
+		var f3: float = float(i) / 5.0
+		mid.append(o + Vector2(-W * (1.0 - f3 * 0.5) + sin(t * 2.1 + f3 * 7.0) * 2.5, -H * (0.12 + f3 * 0.9)))
+	for i in 6:
+		var f4: float = float(i) / 5.0
+		mid.append(o + Vector2(W * (0.5 + f4 * 0.5) + sin(t * 1.8 + f4 * 6.0 + 1.0) * 2.5, -H * (1.02 - f4 * 0.9)))
+	mid.append(o + Vector2(W * 1.1, 0))
+	draw_colored_polygon(mid, Color(0.06, 0.20, 0.24, 0.85))
+	# the god inside — a shadow with shoulders, seen through the water
+	var shd := PackedVector2Array([
+		o + Vector2(-W * 0.62, 0), o + Vector2(-W * 0.66, -H * 0.45),
+		o + Vector2(-W * 0.5, -H * 0.68), o + Vector2(-W * 0.28, -H * 0.8),
+		o + Vector2(-W * 0.16, -H * 0.94), o + Vector2(W * 0.16, -H * 0.94),
+		o + Vector2(W * 0.28, -H * 0.8), o + Vector2(W * 0.5, -H * 0.68),
+		o + Vector2(W * 0.66, -H * 0.45), o + Vector2(W * 0.62, 0)])
+	draw_colored_polygon(shd, Color(0.015, 0.06, 0.08, 0.92))
+	# TENTACLES — rising and curling around the column
+	for tn in 4:
+		var side: float = -1.0 if tn % 2 == 0 else 1.0
+		var ph: float = t * 0.9 + tn * 1.9
+		var base := o + Vector2(side * W * (0.9 + tn * 0.14), 0)
+		var prev := base
+		var th: float = 3.4 * g * 0.5
+		for s in 7:
+			var f5: float = float(s + 1) / 7.0
+			var npt := base + Vector2(side * (sin(ph + f5 * 3.4) * 9.0 + f5 * 10.0) * g * 0.35,
+				-H * f5 * (0.5 + 0.12 * sin(ph * 0.7)) - sin(ph + f5 * 5.0) * 4.0)
+			draw_line(prev, npt, Color(0.05, 0.17, 0.2), th * (1.0 - f5 * 0.75) + 1.2)
+			prev = npt
+		draw_circle(prev, 1.6, Color(0.14, 0.4, 0.42))
+	# kelp crown — thin strands off the head, streaming
+	for k in 5:
+		var kb := o + Vector2((k - 2) * 2.4 * g * 0.4, -H * 0.94)
+		draw_line(kb, kb + Vector2((k - 2) * 3.0 + sin(t * 2.0 + k) * 4.0, -7.0 * g * 0.4 - (k % 3) * 3.0),
+			Color(0.08, 0.22, 0.2), 1.0)
+	# THE EYES — the only light it owes anyone
+	var ey := o + Vector2(facing * W * 0.1, -H * 0.82)
+	var blink: float = 0.0 if fmod(t, 6.0) < 5.8 else 1.0
+	if blink < 0.5:
+		for side2 in [-1.0, 1.0]:
+			var ep := ey + Vector2(side2 * W * 0.16, 0)
+			draw_circle(ep, 8.0, Color(0.5, 1.4, 1.3, 0.10))
+			draw_circle(ep, 3.4, Color(0.5, 1.4, 1.3, 0.30))
+			draw_circle(ep, 1.7, Color(1.3, 2.4, 2.2))
+	# foam skirt at the waterline + constant falling water
+	for fm in 8:
+		var fx := o.x + (fm - 3.5) * W * 0.36 + sin(t * 3.0 + fm) * 3.0
+		draw_circle(Vector2(fx, -1.5 + sin(t * 5.0 + fm * 2.0) * 1.2), 2.4 + (fm % 3), Color(0.55, 0.85, 0.85, 0.20))
+	if randf() < 0.5:
+		parts.append({"pos": o + Vector2(randf_range(-W, W), -randf_range(H * 0.3, H * 0.9)),
+			"vel": Vector2(randf_range(-3, 3), randf_range(30, 60)), "life": randf_range(0.3, 0.7),
+			"col": Color(0.4, 0.8, 0.85, 0.55), "size": 1.3})
 	# the bay follows him — fish leap in his wake
 	if randf() < 0.06:
 		parts.append({"pos": pos + Vector2(randf_range(-60, 60), -2), "vel": Vector2(randf_range(-20, 20), randf_range(-95, -55)),
@@ -5087,22 +5075,155 @@ func _draw_rider() -> void:
 	if randf() < 0.2:
 		parts.append({"pos": pos + Vector2(randf_range(-30, 30), randf_range(-8, -2)), "vel": Vector2(randf_range(-4, 4), -6),
 			"life": 1.4, "col": Color(0.55, 0.7, 0.3, 0.4), "size": 2.5, "fire": true, "smoke": true})
-	var gait: float = absf(sin(t * 6.0)) * 1.5 if absf(vel.x) > 10.0 else 0.0
-	draw_set_transform(pos + Vector2(0, -gait), 0.0, Vector2(1.3 * facing * growth, 1.3 * growth))
-	var rframe: Texture2D = tex_rider_b if (absf(vel.x) > 10.0 and int(t * 9.0) % 2 == 1) else tex_rider
-	draw_texture(rframe, Vector2(-17, -28), Color(1, 1, 1))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# ============ THE PALE RIDER: a mountain of shroud, bone riding on it ============
+	var g: float = 2.7 * growth
+	var gait: float = absf(sin(t * 7.0)) * 2.0 if absf(vel.x) > 10.0 else sin(t * 1.6) * 0.8
+	var o: Vector2 = pos + Vector2(0, -gait)
+	var fx: float = facing
+	var BONE := Color(0.88, 0.83, 0.66)
+	var BONE2 := Color(0.97, 0.93, 0.78)
+	var DK := Color(0.075, 0.06, 0.09)
+	var DK2 := Color(0.12, 0.095, 0.13)
+	# skeletal legs FIRST — the shroud hangs over them
+	var stride: float = sin(t * 9.0) * 5.0 * g * 0.3 if absf(vel.x) > 10.0 else 0.0
+	for leg in [[9.0, stride], [4.0, -stride], [-6.0, stride * 0.8], [-11.0, -stride * 0.8]]:
+		var hipx: float = leg[0]
+		var sw: float = leg[1]
+		var hip := o + Vector2(fx * hipx * g * 0.5, -10.0 * g * 0.5)
+		var knee := hip + Vector2(fx * sw * 0.5, 5.5 * g * 0.5)
+		var hoof := knee + Vector2(fx * sw, 5.5 * g * 0.5)
+		hoof.y = minf(hoof.y, -1.0)
+		draw_line(hip, knee, BONE, 2.2)
+		draw_line(knee, hoof, BONE, 1.7)
+		draw_line(hoof, hoof + Vector2(fx * 2.0, 0), BONE2, 2.0)
+	# THE SHROUD — one ragged black mass, horse and rider drowned in it
+	var shr := PackedVector2Array()
+	shr.append(o + Vector2(fx * 14.0 * g * 0.5, -8.0 * g * 0.5))            # breast
+	shr.append(o + Vector2(fx * 16.0 * g * 0.5, -20.0 * g * 0.5))           # neck base
+	shr.append(o + Vector2(fx * 10.0 * g * 0.5, -26.0 * g * 0.5))           # withers
+	shr.append(o + Vector2(fx * 5.0 * g * 0.5, -37.0 * g * 0.5))            # rider chest
+	shr.append(o + Vector2(fx * -1.0 * g * 0.5, -41.0 * g * 0.5))           # hood peak
+	shr.append(o + Vector2(fx * -7.0 * g * 0.5, -37.0 * g * 0.5 + sin(t * 2.2) * 1.5))
+	# the cloak billows back and shreds into the wind
+	for i in 5:
+		var f: float = float(i) / 4.0
+		shr.append(o + Vector2(fx * (-12.0 - f * 20.0) * g * 0.5 + sin(t * 2.0 + f * 4.0) * 3.0 * (0.4 + f),
+			(-30.0 + f * 22.0) * g * 0.5 + sin(t * 2.6 + f * 5.0) * 2.5))
+	# ragged hem crawling back to the breast
+	for i in 6:
+		var f2: float = float(i) / 5.0
+		shr.append(o + Vector2(fx * (-28.0 + f2 * 40.0) * g * 0.5,
+			(-2.0 - fmod(sin((f2 + t * 0.13) * 31.0) * 7.0, 5.0)) * g * 0.5))
+	draw_colored_polygon(shr, DK)
+	# inner shroud sheen
+	draw_circle(o + Vector2(fx * 2.0 * g * 0.5, -24.0 * g * 0.5), 9.0 * g * 0.5, DK2)
+	draw_circle(o + Vector2(fx * -8.0 * g * 0.5, -18.0 * g * 0.5), 7.0 * g * 0.5, DK2)
+	# cloak wisps tear off into the fog
+	if randf() < 0.3:
+		parts.append({"pos": o + Vector2(fx * randf_range(-30.0, -14.0) * g * 0.5, -randf_range(4.0, 26.0) * g * 0.5),
+			"vel": Vector2(-fx * randf_range(6, 16), randf_range(-6, 2)), "life": randf_range(0.5, 1.1),
+			"col": Color(0.08, 0.065, 0.1, 0.8), "size": randf_range(2.0, 3.5)})
+	# HORSE SKULL — bone-white, thrust from the shroud
+	var sk := o + Vector2(fx * 20.0 * g * 0.5, -24.0 * g * 0.5)
+	draw_colored_polygon(PackedVector2Array([
+		sk + Vector2(-fx * 4.0, -3.5 * g * 0.4), sk + Vector2(fx * 9.0 * g * 0.4, -2.0 * g * 0.4),
+		sk + Vector2(fx * 12.0 * g * 0.4, 2.0 * g * 0.4), sk + Vector2(fx * 7.0 * g * 0.4, 4.5 * g * 0.4),
+		sk + Vector2(-fx * 3.0, 3.0 * g * 0.4)]), BONE)
+	draw_colored_polygon(PackedVector2Array([
+		sk + Vector2(fx * 7.0 * g * 0.4, 4.5 * g * 0.4), sk + Vector2(fx * 11.0 * g * 0.4, 7.5 * g * 0.4),
+		sk + Vector2(fx * 5.0 * g * 0.4, 6.5 * g * 0.4)]), BONE2)   # jaw
+	draw_circle(sk + Vector2(fx * 5.0 * g * 0.4, -0.5), 1.6, Color(0.05, 0.02, 0.04))
+	draw_circle(sk + Vector2(fx * 5.0 * g * 0.4, -0.5), 0.7, Color(1.7, 0.35, 0.25))   # ember in the socket
+	for br in 2:   # bridle horns
+		draw_line(sk + Vector2(-fx * 2.0, -3.0 - br * 1.5), sk + Vector2(-fx * 5.0, -6.0 - br * 2.5), BONE2, 1.2)
+	# RIDER SKULL + horn crown, high on the mass
+	var rs := o + Vector2(fx * -1.0 * g * 0.5, -38.5 * g * 0.5)
+	draw_circle(rs, 3.2 * g * 0.4, BONE)
+	draw_rect(Rect2(rs.x - 2.0, rs.y + 1.0, 4.0, 2.2), BONE2)   # teeth row
+	draw_circle(rs + Vector2(fx * 1.2, -0.6), 0.9, Color(0.05, 0.02, 0.04))
+	draw_circle(rs + Vector2(fx * 1.2, -0.6), 0.45, Color(1.9, 1.6, 0.6))
+	for hn in [-1.0, 1.0]:
+		var hb := rs + Vector2(hn * 2.6, -2.0)
+		draw_line(hb, hb + Vector2(hn * 3.5, -3.5), BONE2, 1.4)
+		draw_line(hb + Vector2(hn * 3.5, -3.5), hb + Vector2(hn * 4.2, -6.5), BONE2, 1.0)
+	# ribs surfacing through the shroud
+	for rb in 3:
+		draw_arc(o + Vector2(fx * 2.0 * g * 0.5, (-32.0 + rb * 2.6) * g * 0.5), (4.0 + rb) * g * 0.35,
+			PI * 0.15, PI * 0.85, 8, Color(BONE.r, BONE.g, BONE.b, 0.55 - rb * 0.12), 1.2)
+	# THE SCYTHE — a pale moon over everything
+	var haft_a := o + Vector2(fx * -6.0 * g * 0.5, -14.0 * g * 0.5)
+	var haft_b := o + Vector2(fx * 6.0 * g * 0.5, -48.0 * g * 0.5)
+	draw_line(haft_a, haft_b, Color(0.16, 0.13, 0.16), 1.8)
+	draw_arc(haft_b + Vector2(fx * -6.0, 3.0), 11.0 * g * 0.45,
+		(-0.5 if fx > 0 else PI - 1.4), (1.4 if fx > 0 else PI + 0.5), 14, BONE2, 2.6)
+	draw_arc(haft_b + Vector2(fx * -6.0, 3.0), 9.4 * g * 0.45,
+		(-0.35 if fx > 0 else PI - 1.2), (1.2 if fx > 0 else PI + 0.35), 12, Color(BONE.r, BONE.g, BONE.b, 0.5), 1.4)
 
 func _draw_swarm() -> void:
 	if pos.y > -120:
 		var sa: float = clampf(1.0 + pos.y / 120.0, 0.0, 0.5)
 		draw_rect(Rect2(pos.x - radius * 0.7, -1, radius * 1.4, 2), Color(0, 0, 0, sa * 0.5))
-	# glow halo (blooms) + dark core
+	# ============ THE SWARM: a locust colossus — head of chitin on a body of billions ============
+	var facing: float = signf(aim.x - pos.x)
+	if facing == 0.0:
+		facing = 1.0
+	# ROOT TENDRILS — streams of insects trailing to the earth like the thing has grown roots
+	for tn in 4:
+		var ph: float = t * 0.7 + tn * 1.7
+		var bx: float = pos.x + (tn - 1.5) * radius * 0.5
+		var reach_y: float = minf(-2.0, pos.y + radius * 0.4)
+		var steps := 8
+		var prev := Vector2(bx, pos.y + radius * 0.5)
+		for s in steps:
+			var f: float = float(s + 1) / steps
+			var npt := Vector2(bx + sin(ph + f * 4.0) * (6.0 + f * 14.0), lerpf(pos.y + radius * 0.5, -2.0, f))
+			if npt.y < reach_y:
+				continue
+			# the stream is dashes of insects, not a line
+			var seg := (npt - prev)
+			for d in 3:
+				var dp := prev + seg * (d / 3.0) + Vector2(randf_range(-2, 2), randf_range(-2, 2))
+				draw_line(dp, dp + Vector2(2.0, 1.0), Color(0.55, 0.1, 0.12, 0.8 - f * 0.3), 1.0)
+			prev = npt
+		# where the roots feed, the ground crawls
+		draw_circle(Vector2(prev.x, -2.0), 4.0 + sin(t * 5.0 + tn) * 1.5, Color(0.4, 0.08, 0.1, 0.3))
+	# glow halo (blooms) + dark boiling core
 	draw_circle(pos, radius * 1.5, Color(0.9, 0.12, 0.18, 0.10))
 	draw_circle(pos, radius * 0.9, Color(1.1, 0.15, 0.2, 0.14))
 	draw_circle(pos + Vector2(0, 1), radius * 0.62, Color("#2a0614"))
 	draw_circle(pos + Vector2(-3, -2), radius * 0.45, Color("#3a0a16"))
 	draw_circle(pos + Vector2(3, 2), radius * 0.4, Color("#1e0510"))
+	# THE HEAD — hard chitin surfacing from the cloud, watching where you point
+	var hp2 := pos + Vector2(facing * radius * 0.42, -radius * 0.3 + sin(t * 2.4) * 1.5)
+	var CH := Color(0.42, 0.28, 0.14)
+	var CH2 := Color(0.55, 0.4, 0.2)
+	var hs: float = radius * 0.4
+	draw_colored_polygon(PackedVector2Array([
+		hp2 + Vector2(-facing * hs * 0.9, -hs * 0.5), hp2 + Vector2(facing * hs * 0.3, -hs * 0.75),
+		hp2 + Vector2(facing * hs * 1.15, -hs * 0.1), hp2 + Vector2(facing * hs * 0.9, hs * 0.5),
+		hp2 + Vector2(-facing * hs * 0.3, hs * 0.65), hp2 + Vector2(-facing * hs * 1.0, hs * 0.1)]), CH)
+	draw_colored_polygon(PackedVector2Array([
+		hp2 + Vector2(-facing * hs * 0.6, -hs * 0.45), hp2 + Vector2(facing * hs * 0.2, -hs * 0.6),
+		hp2 + Vector2(facing * hs * 0.5, -hs * 0.2), hp2 + Vector2(-facing * hs * 0.4, -hs * 0.1)]), CH2)
+	# mandibles working
+	var mnd: float = sin(t * 8.0) * 1.5 + 1.5
+	draw_line(hp2 + Vector2(facing * hs * 1.0, hs * 0.2), hp2 + Vector2(facing * (hs * 1.3 + mnd), hs * 0.55), CH2, 1.6)
+	draw_line(hp2 + Vector2(facing * hs * 0.85, hs * 0.45), hp2 + Vector2(facing * (hs * 1.15 + mnd), hs * 0.8), CH2, 1.4)
+	# compound eye — amber, hungry, brightens as you feed
+	var eb: float = 1.0 + (0.6 if feeding else 0.0) + hit_flash * 0.5
+	draw_circle(hp2 + Vector2(facing * hs * 0.45, -hs * 0.15), hs * 0.34, Color(0.1, 0.04, 0.02))
+	draw_circle(hp2 + Vector2(facing * hs * 0.45, -hs * 0.15), hs * 0.26, Color(1.6 * eb, 0.9 * eb, 0.2))
+	draw_circle(hp2 + Vector2(facing * hs * 0.52, -hs * 0.2), hs * 0.1, Color(2.4, 1.8, 0.7))
+	# antennae swept back
+	for an in 2:
+		var ab := hp2 + Vector2(-facing * hs * 0.2, -hs * (0.5 + an * 0.15))
+		var prev2 := ab
+		for s2 in 4:
+			var f6: float = float(s2 + 1) / 4.0
+			var npt2 := ab + Vector2(-facing * f6 * hs * (1.3 + an * 0.3),
+				-f6 * hs * 0.5 + sin(t * 3.0 + f6 * 4.0 + an) * 2.0)
+			draw_line(prev2, npt2, CH2, 1.4 - f6 * 0.8)
+			prev2 = npt2
 	for m in motes:
 		m.a += 0.025 * m.s
 		var wob: float = sin(t * 6.5 + m.o) * 3.0
