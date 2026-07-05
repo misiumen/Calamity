@@ -1203,6 +1203,12 @@ func _build_city() -> void:
 	for si in mini(n_specials, candidates.size()):
 		buildings[candidates[si]].special = specials[si]
 		specials_total += 1
+	# villages get their province's signature anchor — something tall to topple
+	if node_kind in ["hamlet", "prologue"] and buildings.size() > 3:
+		var ak: Array = {"thornspire": ["church", 2.0], "teotl": ["shrine", 2.2],
+			"maren": ["warehouse", 1.9], "ashport": ["mall", 1.8],
+			"kowloon": ["school", 2.0]}.get(Global.city, ["church", 1.9])
+		buildings.append(_mk_building(buildings[buildings.size() / 2].x + 14.0, _gen_lowrise(ak[0]), ak[1], false, ak[0]))
 	# one landmark per node — the place worth remembering, and razing
 	if node_kind in ["town", "city", "capital"] and buildings.size() > 4:
 		var lm: Array = {"thornspire": ["church", "THE CATHEDRAL"], "teotl": ["ziggurat", "THE GREAT ZIGGURAT"],
@@ -1372,7 +1378,7 @@ func _process(delta: float) -> void:
 	# end screens breathe on a real clock (arm delay, ledger reveal)
 	if over:
 		over_t += delta
-		if end_pending and over_t >= 0.8:
+		if end_pending and over_t >= 0.35:
 			end_pending = false
 			_end_advance()
 	# the arrival flavor line steps aside after a few seconds
@@ -3830,7 +3836,7 @@ class DraftUI extends Control:
 		var tt: float = Time.get_ticks_msec() * 0.001
 		if not m.draft_open:
 			# the crusade end-card, in the card language
-			var armed: bool = m.over_t >= 0.8
+			var armed: bool = m.over_t >= 0.35
 			var r0 := Rect2(220, 222, 200, 40)
 			var bord0: Color = Color(1.9, 0.6, 0.6) if armed else Color(0.35, 0.3, 0.4)
 			draw_rect(r0, Color("#151020"))
@@ -3841,6 +3847,8 @@ class DraftUI extends Control:
 				draw_rect(Rect2(r0.position + c0, Vector2(6, 6)), bord0)
 			draw_string(f, Vector2(r0.position.x, r0.position.y + 25), m.end_label, HORIZONTAL_ALIGNMENT_CENTER, r0.size.x, 12,
 				Color(1.8, 0.55, 0.55) if armed else Color(0.6, 0.55, 0.65))
+			if armed:
+				draw_string(f, Vector2(0, 282), "click anywhere / ENTER", HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(0.65, 0.6, 0.72))
 			return
 		draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.0, 0.05, 0.93))
 		draw_string(f, Vector2(0, 36), m.draft_title, HORIZONTAL_ALIGNMENT_CENTER, 640, 17, Color(1.9, 0.5, 0.55))
@@ -4473,13 +4481,13 @@ func _crusade_button(label: String, win: bool) -> void:
 	end_win = win
 
 func _end_click() -> void:
-	if over_t >= 0.8:
+	if over_t >= 0.35:
 		_end_advance()
 	else:
 		end_pending = true
 
 func _end_advance() -> void:
-	if end_label == "" or over_t < 0.8:
+	if end_label == "" or over_t < 0.35:
 		return
 	Engine.time_scale = 1.0
 	var lbl := end_label
@@ -4507,9 +4515,10 @@ func _input(e: InputEvent) -> void:
 	if caption_layer != null and ((e is InputEventMouseButton and e.pressed) 			or (e is InputEventKey and e.pressed and e.physical_keycode in [KEY_SPACE, KEY_ENTER])):
 		_caption_advance()
 		return
-	if over and end_label != "" and e is InputEventKey and e.pressed and e.physical_keycode == KEY_ENTER:
-		_end_advance()
-		return
+	if over and end_label != "":
+		if (e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT) 				or (e is InputEventKey and e.pressed and e.physical_keycode in [KEY_ENTER, KEY_SPACE]):
+			_end_click()
+			return
 	if draft_open and e is InputEventKey and e.pressed:
 		var ki: int = e.physical_keycode - KEY_1
 		if ki >= 0 and ki < draft_opts.size():
