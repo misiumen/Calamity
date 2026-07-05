@@ -84,6 +84,7 @@ var over := false
 var shake := 0.0
 var t := 0.0
 var bite_cd := 0.0
+var swarm_frenzy := false        # over half-fed: the cloud attacks harder, reaches farther
 
 var buildings: Array = []
 var total_mass := 0.0
@@ -253,7 +254,7 @@ func _ready() -> void:
 		"drowned":
 			cam.zoom = Vector2(0.8, 0.8)
 			radius = 24.0
-			dmg_taken_mult = 0.6
+			dmg_taken_mult = 0.45
 			pos = Vector2(560, -12)
 		"rider":
 			cam.zoom = Vector2(0.85, 0.85)
@@ -1287,6 +1288,7 @@ func _build_city() -> void:
 func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "tower") -> Dictionary:
 	var img := Image.new()
 	img.copy_from(src)
+	var banner_px := Vector2.ZERO
 	# bake a neon banner / sign onto tower walls — destruction eats it with the wall
 	if kind == "tower" and not cit and randf() < 0.5 and not banner_imgs.is_empty() and Global.city != "thornspire":
 		var bn: Image = banner_imgs[randi() % banner_imgs.size()]
@@ -1294,16 +1296,19 @@ func _mk_building(x: float, src: Image, sc: float, cit: bool, kind: String = "to
 			var bx := randi_range(4, img.get_width() - bn.get_width() - 4)
 			var by := randi_range(10, img.get_height() - bn.get_height() - 10)
 			img.blend_rect(bn, Rect2i(0, 0, bn.get_width(), bn.get_height()), Vector2i(bx, by))
+			banner_px = Vector2(bx + bn.get_width() * 0.5, by + bn.get_height() * 0.5)
 	var w: float = img.get_width() * sc
 	var h: float = img.get_height() * sc
 	var mass: float = w * h * (0.020 if cit else 0.012)
+	var bdict_banner := banner_px
 	if Global.mode == "skirmish" and Global.mutator == "glass":
 		mass *= 0.6
 	return {"x": x, "w": w, "h": h, "sc": sc, "img": img,
 		"tex": ImageTexture.create_from_image(img),
 		"hp": mass, "maxhp": mass, "holes": [], "dead": false, "dying": 0.0, "cit": cit,
 		"cur_h": h, "seed": x * 0.77, "burn": 0.0, "kind": kind, "flames": [],
-		"topple": 0.0, "top_dir": 0.0, "top_chain": 0, "base_carve": 0.0, "carve_bias": 0.0}
+		"topple": 0.0, "top_dir": 0.0, "top_chain": 0, "base_carve": 0.0, "carve_bias": 0.0,
+		"banner_px": bdict_banner}
 
 func _hash(n: float) -> float:
 	return fmod(absf(sin(n * 127.1) * 43758.55), 1.0)
@@ -1418,6 +1423,11 @@ func _process(delta: float) -> void:
 		"swarm":
 			radius = 22.0 * growth
 			tendril_range = (140.0 if nodes.has("sinew") else 100.0) * growth
+			var lo3: float = 0.0 if bio_stage == 0 else BIO_THRESH[mini(bio_stage - 1, BIO_THRESH.size() - 1)]
+			var hi3: float = BIO_THRESH[mini(bio_stage, BIO_THRESH.size() - 1)]
+			swarm_frenzy = bio_stage >= BIO_THRESH.size() or (bio - lo3) / maxf(1.0, hi3 - lo3) > 0.5
+			if swarm_frenzy:
+				tendril_range *= 1.2
 		"keraunos": radius = 52.0 * growth
 		"tzitzimitl": radius = 16.0 * growth
 		"drowned": radius = 24.0 * growth
@@ -1506,7 +1516,7 @@ func _process(delta: float) -> void:
 				_tzitzi_move(delta)
 				_tzitzi(delta)
 			"drowned":
-				_ground_move(delta, 115.0)
+				_ground_move(delta, 132.0)
 				_drowned(delta)
 			"rider":
 				_ground_move(delta, 95.0)
@@ -1820,7 +1830,7 @@ func _people(delta: float) -> void:
 				p.vx = move_toward(p.vx, signf(rb.x + rb.w * 0.5 - p.pos.x) * 30.0, 100.0 * delta)
 				p.pos.x += p.vx * delta
 				if rd < rb.w * 0.5 + 6.0:
-					rb.hp -= 1.6 * delta
+					rb.hp -= 2.6 * delta
 					score_f += 1.2 * delta * combo * TIER_MULT[tier]
 					_feed("fear", 0.7 * delta)
 					if randf() < 0.5 * delta:
@@ -1979,7 +1989,12 @@ var rally := Vector2.ZERO
 var has_rally := false
 var e_prev := false
 var scythe_t := 0.0
+var tide_w := 60.0               # the drowned one's walking sea
+var aura_flood := {}
+var deluges: Array = []          # tidal waves in flight {x, dir, id}
+var deluge_id := 0
 var scythe_ang := 0.0
+var grave_stacks := 0            # every 5 raised: the horde swings harder
 var flood: Array = []            # water zones {x0, x1, t_left}
 var trail_cd := 0.0
 
@@ -2000,6 +2015,34 @@ func _tendrils(delta: float) -> void:
 		if q.t_left <= 0.0:
 			_shockwave(q.p, 30.0)
 	aftershock_q = aftershock_q.filter(func(q): return q.t_left > 0.0)
+	# tidal waves cross the world, drowning street by street
+	for dw in deluges:
+		dw.x += dw.dir * 300.0 * delta
+		if absf(dw.x - float(dw.get("last_drop", -1e9))) > 24.0:
+			dw.last_drop = dw.x
+			flood.append({"x0": dw.x - 30.0, "x1": dw.x + 30.0, "t_left": 10.0})
+		for b in buildings:
+			if not b.dead and b.dying <= 0.0 and b.topple == 0.0 and b.get("deluge_id", 0) != dw.id \
+					and dw.x > b.x and dw.x < b.x + b.w:
+				b.deluge_id = dw.id
+				b.hp -= 55.0
+				for k in 3:
+					_carve(b, Vector2(dw.x + randf_range(-8, 8), -randf_range(4.0, b.cur_h * 0.5)), randf_range(3.0, 5.0))
+				if b.hp <= 0.0:
+					_collapse(b)
+		for u in units:
+			if not u.get("dead", false) and u.kind != "jet" and absf(u.pos.x - dw.x) < 26.0:
+				u.fall = true
+				u.vy = -90.0
+				u.hp = u.get("hp", 1) - 2
+				if u.hp <= 0:
+					u.dead = true
+					_kill_unit(u)
+		if randf() < 0.5:
+			parts.append({"pos": Vector2(dw.x + randf_range(-14, 14), -randf_range(8.0, 44.0)),
+				"vel": Vector2(dw.dir * 40.0, randf_range(-30, 10)), "life": 0.5,
+				"col": Color(0.5, 0.85, 0.85, 0.6), "size": 2.0})
+	deluges = deluges.filter(func(dw2): return dw2.x > 60.0 and dw2.x < world_w - 60.0)
 	# seismic slam waves travel the street
 	for s in slams:
 		s.dist += 240.0 * delta
@@ -2095,7 +2138,7 @@ func _tendrils(delta: float) -> void:
 				_chew(b, delta)
 				break
 	# reel / throw / fall — units smashing through buildings on the way
-	var crash_dmg: float = 9.0 if nodes.has("flenser") else 4.0
+	var crash_dmg: float = 12.0 if nodes.has("flenser") else 5.5
 	for u in units:
 		if u.get("thrown", false):
 			u.pos += u.tvel * delta
@@ -2136,7 +2179,7 @@ func _tendrils(delta: float) -> void:
 
 # ================= KERAUNOS =================
 func _keraunos(delta: float) -> void:
-	bolt_charges = minf(bolt_max, bolt_charges + delta / 1.0)
+	bolt_charges = minf(bolt_max, bolt_charges + delta * (1.25 if combo >= 4.0 else 1.0))
 	rmb_cd -= delta
 	stun_t = maxf(0.0, stun_t - delta)
 	aim = _mouse_world()
@@ -2234,10 +2277,10 @@ func _keraunos(delta: float) -> void:
 			rmb_cd = 1.2
 			meter -= sf_cost
 			_skyfall(aim)
-		elif meter >= (70.0 if nodes.has("stormfront") else 100.0):
+		elif meter >= (60.0 if nodes.has("stormfront") else 80.0):
 			# TEMPEST barrage
 			rmb_cd = 2.0
-			meter -= 70.0 if nodes.has("stormfront") else 100.0
+			meter -= 60.0 if nodes.has("stormfront") else 80.0
 			var n_strikes: int = 9 if nodes.has("stormfront") else 7
 			for i in n_strikes:
 				var tx: float = cam.position.x + randf_range(-320, 320)
@@ -2263,6 +2306,8 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 	threat = minf(100.0, threat + 1.2 * power)
 	_flash(p, 2.4 * power)
 	_sfx("thunder")
+	if nodes.has("conduction"):
+		_conduct(p, 3)
 	if branch == "ball" or nodes.has("twincast"):
 		var n_orbs: int = 2 if nodes.has("twincast") else 1
 		for i in n_orbs:
@@ -2275,7 +2320,7 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 			_carve(b, hit, randf_range(11.0, 15.0) * power)
 			_carve(b, hit + Vector2(randf_range(-8, 8), randf_range(5, 13)), 7.0 * power)
 			b.holes.append({"p": hit - Vector2(b.x, -b.h), "o": randf() * TAU})
-			b.hp -= 75.0 * power
+			b.hp -= 52.0 * power
 			_ignite(b, (4.5 if nodes.has("overcharge") else 2.5) * power)
 			var gain: float = 75.0 * power * 1.6 * combo * TIER_MULT[tier]
 			score_f += gain
@@ -2301,6 +2346,87 @@ func _strike(p: Vector2, power: float = 1.0) -> void:
 			pass
 			_mist(Vector2(pe.pos.x, -5))
 	_hit_props(p, 26.0 * power)
+
+func _conduct(from: Vector2, jumps: int) -> void:
+	# the bolt seeks the nearest conductor: lamps, machines, flesh —
+	# buildings only answer through their metal signage
+	var visited: Array = []
+	var cur := from
+	for j in jumps:
+		var best_p := Vector2.ZERO
+		var best_d := 95.0
+		var best_kind := ""
+		var best_ref = null
+		for l in lamps:
+			if not l.dead and not visited.has(l):
+				var d0: float = Vector2(l.x, -24).distance_to(cur)
+				if d0 < best_d and d0 > 4.0:
+					best_d = d0
+					best_p = Vector2(l.x, -24)
+					best_kind = "lamp"
+					best_ref = l
+		for u in units:
+			if not u.get("dead", false) and u.kind != "carcass" and not visited.has(u):
+				var d1: float = (u.pos + Vector2(0, -8)).distance_to(cur)
+				if d1 < best_d and d1 > 4.0:
+					best_d = d1
+					best_p = u.pos + Vector2(0, -8)
+					best_kind = "unit"
+					best_ref = u
+		for pe in people:
+			if not pe.get("dead", false) and not visited.has(pe):
+				var d2: float = Vector2(pe.pos.x, -5).distance_to(cur)
+				if d2 < best_d and d2 > 4.0:
+					best_d = d2
+					best_p = Vector2(pe.pos.x, -5)
+					best_kind = "person"
+					best_ref = pe
+		for c in cars:
+			if not c.dead and not c.get("gone", false) and not visited.has(c):
+				var d3: float = Vector2(c.x + c.w * 0.5, -6).distance_to(cur)
+				if d3 < best_d and d3 > 4.0:
+					best_d = d3
+					best_p = Vector2(c.x + c.w * 0.5, -6)
+					best_kind = "car"
+					best_ref = c
+		for b in buildings:
+			if not b.dead and b.dying <= 0.0 and b.banner_px != Vector2.ZERO and not visited.has(b):
+				var bp := Vector2(b.x + b.banner_px.x * b.sc, -b.h + b.banner_px.y * b.sc)
+				var d4: float = bp.distance_to(cur)
+				if d4 < best_d and d4 > 4.0:
+					best_d = d4
+					best_p = bp
+					best_kind = "building"
+					best_ref = b
+		if best_ref == null:
+			return
+		visited.append(best_ref)
+		bolts.append({"from": cur, "to": best_p, "t_left": 0.14})
+		_boom(best_p, 5, Color(1.2, 1.9, 2.5), 60.0)
+		match best_kind:
+			"lamp":
+				best_ref.dead = true
+				lamps_down += 1
+				_feed("charge", 3.0)
+			"unit":
+				best_ref.hp = best_ref.get("hp", 1) - 2
+				if best_ref.hp <= 0:
+					best_ref.dead = true
+					_kill_unit(best_ref)
+			"person":
+				best_ref.dead = true
+				score_f += 20.0 * combo * TIER_MULT[tier]
+				_gout(best_p, "charge", 2.0, 1)
+			"car":
+				best_ref.dead = true
+				_fire(best_p)
+			"building":
+				best_ref.hp -= 14.0
+				_carve(best_ref, best_p, 5.0)
+				_ignite(best_ref, 1.2)
+				if best_ref.hp <= 0.0:
+					_collapse(best_ref)
+		cur = best_p
 
 func _skyfall(p: Vector2) -> void:
 	# charged mega-bolt: deletes a vertical slice of whatever it hits
@@ -2399,7 +2525,7 @@ func _tzitzi(delta: float) -> void:
 	feathers = feathers.filter(func(f2): return f2.t_left > 0.0)
 	units = units.filter(func(u): return not u.get("dead", false))
 	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	var cd_base: float = 0.72 * (0.6 if nodes.has("serration") else 1.0)
+	var cd_base: float = 0.82 * (0.55 if nodes.has("serration") else 1.0)
 	var cd_needed: float = cd_base * (0.5 if (blackout_t > 0.0 or sun_eaten) else 1.0)
 	if lmb and not lmb_prev and dive_cd <= 0.0:
 		dive_cd = cd_needed
@@ -2428,7 +2554,10 @@ func _tzitzi(delta: float) -> void:
 	# diving: pierce everything on the path
 	if dive_t > 0.0:
 		var mult: float = 1.6 if blackout_t > 0.0 else (1.3 if sun_eaten else 1.0)
-		mult *= 1.0 + minf(0.6, 0.1 * pierced_this_dive)   # chain bonus, capped
+		if branch == "obsidian":
+			mult *= 1.0 + minf(0.6, 0.15 * pierced_this_dive)   # obsidian keeps the chain bonus
+		else:
+			mult *= maxf(0.75, 1.0 - 0.10 * pierced_this_dive)  # everyone else: pierce falloff
 		var carve_r: float = 10.0 if branch == "obsidian" else 7.0
 		for b in buildings:
 			if b.dead or b.dying > 0.0:
@@ -2502,10 +2631,26 @@ func _ground_move(delta: float, top_speed: float) -> void:
 func _drowned(delta: float) -> void:
 	lmb_cd -= delta
 	rmb_cd -= delta
+	# THE TIDE — the sea walks with him, wider as the deep answers
+	tide_w = 90.0 + meter * 0.7 + (70.0 if branch == "tide" else 0.0)
+	if aura_flood.is_empty():
+		aura_flood = {"x0": pos.x - tide_w, "x1": pos.x + tide_w, "t_left": 1e9, "aura": true}
+		flood.append(aura_flood)
+	aura_flood.x0 = pos.x - tide_w
+	aura_flood.x1 = pos.x + tide_w
+	# the sea eats foundations — everything standing in his water rots
+	for b in buildings:
+		if not b.dead and b.dying <= 0.0 and b.topple == 0.0 				and b.x < pos.x + tide_w and b.x + b.w > pos.x - tide_w:
+			b.hp -= 2.2 * delta
+			if randf() < 0.5 * delta:
+				_carve(b, Vector2(b.x + randf() * b.w, -randf_range(3.0, 14.0)), randf_range(2.0, 3.0))
+				_feed("fear", 0.4)
+			if b.hp <= 0.0:
+				_collapse(b)
 	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	# MADDEN — click a mind and it breaks
 	if lmb and not lmb_prev and lmb_cd <= 0.0:
-		lmb_cd = 1.2 if nodes.has("echoes") else 2.4
+		lmb_cd = 0.7 if nodes.has("echoes") else 1.2
 		var hit := false
 		for u in units:
 			if u.get("mad", false) or u.kind in ["carcass", "jet"]:
@@ -2521,9 +2666,20 @@ func _drowned(delta: float) -> void:
 					_pop(Vector2(pe.pos.x, -14), "RIOT", Color(1.4, 0.5, 1.2))
 			_sfx("grab")
 	# THE DEEP ANSWERS — fishmen crawl out
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= 80.0:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= 60.0:
 		rmb_cd = 1.5
-		meter -= 80.0
+		if meter >= 100.0:
+			# DELUGE — the sea stands up and walks
+			meter = 0.0
+			deluge_id += 1
+			deluges.append({"x": pos.x, "dir": signf(aim.x - pos.x + 0.1), "id": deluge_id})
+			impact_frames = 2
+			shake = 18.0
+			_shockripple(pos)
+			_sfx("skyfall")
+			_pop(pos + Vector2(0, -40), "D E L U G E", Color(0.6, 1.8, 1.7))
+		else:
+			meter -= 60.0
 		_sfx("eclipse")
 		var n_fish: int = 6 if branch == "father" else 4
 		for i in n_fish:
@@ -2694,7 +2850,7 @@ func _rider(delta: float) -> void:
 	var fog_r: float = 55.0 * growth
 	for pe in people:
 		if not pe.has("inf") and Vector2(pe.pos.x, -4).distance_to(pos) < fog_r:
-			pe.inf = t + 4.0
+			pe.inf = t + clampf(5.0 - growth * 1.4, 2.5, 4.0)
 	for u in units:
 		if u.kind in ["police", "soldier"] and not u.has("inf") and not u.get("mad", false):
 			if (u.pos + Vector2(0, -8)).distance_to(pos) < fog_r * 0.76:
@@ -2722,6 +2878,7 @@ func _rider(delta: float) -> void:
 		var reach: float = 68.0 * growth
 		scythe_ang = (aim - o).angle()
 		scythe_t = 0.18
+		pos.x = clampf(pos.x + cos(scythe_ang) * 40.0, 40.0, world_w - 40.0)
 		_sfx("shing")
 		shake = maxf(shake, 3.0)
 		for u in units:
@@ -2774,12 +2931,14 @@ func _rider(delta: float) -> void:
 			if pe.has("inf"):
 				pe.dead = true
 				_rise(Vector2(pe.pos.x, -4), false)
+				_shockwave(Vector2(pe.pos.x, -6), 16.0)
 				reaped += 1
 		for u in units:
 			if u.has("inf"):
 				u.dead = true
 				_kill_unit(u)
 				_rise(u.pos, branch == "crown")
+				_shockwave(u.pos + Vector2(0, -6), 18.0)
 				reaped += 1
 		units = units.filter(func(u): return not u.get("dead", false))
 		people = people.filter(func(pe): return not pe.get("dead", false))
@@ -2787,11 +2946,28 @@ func _rider(delta: float) -> void:
 			shake = 10.0
 			_pop(pos + Vector2(0, -26), "R E A P I N G  ×%d" % reaped, Color(1.8, 1.6, 0.7))
 
+func _ally_raze_dmg(k: String) -> float:
+	match k:
+		"risen", "risen_soldier":
+			return 2.6 * (1.0 + 0.2 * grave_stacks)
+		"brute":
+			return 3.6
+		"whelp":
+			return 5.0
+		"fishman":
+			return 1.8
+		"echoself":
+			return 3.0
+	return 2.0
+
 func _rise(p: Vector2, armed: bool) -> void:
-	var cap: int = 16 if branch == "legion" else 8
+	var cap: int = 48 if branch == "legion" else 30
 	if allies.size() >= cap:
 		return
 	risen_count += 1
+	if risen_count % 5 == 0:
+		grave_stacks += 1
+		_pop(pos + Vector2(0, -30), "MASS GRAVE x%d — the horde hits harder" % grave_stacks, Color(1.6, 1.7, 0.9))
 	allies.append({"kind": "risen_soldier" if armed else "risen", "pos": Vector2(p.x, -4),
 		"hp": 4 if armed else 2, "cd": 0.0,
 		"life": 1e9 if nodes.has("endless") else 25.0})
@@ -2808,7 +2984,8 @@ func _allies_update(delta: float) -> void:
 			speed = 26.0
 		# find prey — the risen are a demolition crew first, soldiers second
 		var prey = null
-		var pd: float = 90.0 if a.kind in ["risen", "cultist"] else (200.0 if a.kind == "risen_soldier" else 320.0)
+		var pd: float = 90.0 if a.kind in ["risen", "cultist", "fishman", "brute", "whelp"] \
+			else (200.0 if a.kind == "risen_soldier" else 320.0)
 		for u in units:
 			if u.get("mad", false) or u.kind == "carcass":
 				continue
@@ -2819,7 +2996,7 @@ func _allies_update(delta: float) -> void:
 		var goto: Vector2
 		# idle risen tear the town down (near the rally point if one is set)
 		var raze_b = null
-		if prey == null and a.kind in ["risen", "risen_soldier"] \
+		if prey == null and a.kind in ["risen", "risen_soldier", "fishman", "brute", "whelp", "cultist", "echoself"] \
 				and (not has_rally or absf(a.pos.x - rally.x) <= 60.0):
 			var rbd := 1e9
 			for b in buildings:
@@ -2875,7 +3052,8 @@ func _allies_update(delta: float) -> void:
 		# dead hands against the walls
 		if raze_b != null and a.cd <= 0.0 and absf(a.pos.x - (raze_b.x + raze_b.w * 0.5)) < raze_b.w * 0.5 + 8.0:
 			a.cd = 0.75
-			raze_b.hp -= 2.6
+			var soak2: float = 2.0 if (character == "drowned" and absf(a.pos.x - pos.x) < tide_w) else 1.0
+			raze_b.hp -= _ally_raze_dmg(a.kind) * soak2
 			_carve(raze_b, Vector2(a.pos.x + randf_range(-5, 5), randf_range(-16.0, -4.0)), randf_range(2.0, 3.5))
 			score_f += 2.0 * combo * TIER_MULT[tier]
 			_feed("death", 0.35)
@@ -3338,7 +3516,7 @@ func _shockwave(p: Vector2, r: float) -> void:
 
 func _chew(b: Dictionary, delta: float) -> void:
 	var maul: bool = branch == "ironmaw"
-	var bite: float = (11.0 + combo * 3.2) * delta * (1.0 + tier * 0.15) * (1.8 if maul else 1.0)
+	var bite: float = (13.7 + combo * 4.0) * delta * (1.0 + tier * 0.15) * (1.8 if maul else 1.0) * (1.2 if swarm_frenzy else 1.0)
 	b.hp -= bite
 	threat = min(100.0, threat + bite * 0.06)
 	combo_idle = 0.0
@@ -3423,6 +3601,7 @@ const NODE_DEFS := {
 		{"id": "cloud", "name": "CARRION CLOUD", "kind": "PASSIVE", "desc": "every kill feeds you — bonus healing and combo"},
 	],
 	"manyheads": [
+		{"id": "conduction", "name": "CONDUCTION", "kind": "PASSIVE", "desc": "bolts chain to the nearest conductor — lamps, machines, flesh; buildings only through their signage"},
 		{"id": "fourthhead", "name": "FIFTH THROAT", "kind": "PASSIVE", "desc": "+1 banked bolt and faster recharge"},
 		{"id": "overcharge", "name": "OVERCHARGE", "kind": "PASSIVE", "desc": "strikes set buildings properly ablaze and tear wider craters"},
 		{"id": "stormfront", "name": "STORMFRONT", "kind": "ACTIVE — RMB", "desc": "TEMPEST costs less and rains nine bolts instead of seven"},
@@ -3509,6 +3688,7 @@ const DELTA := {
 	"burst": ["NEW: RMB detonate all pods", "craters + shockwaves"],
 	"creep": ["dying pods seed a child"],
 	"cloud": ["kills heal +6", "kills combo +0.3"],
+	"conduction": ["bolts chain 3x to conductors", "lamps / machines / flesh", "buildings via billboards"],
 	"fourthhead": ["+1 banked bolt", "recharge faster"],
 	"overcharge": ["strikes truly ignite", "craters +50% wider"],
 	"stormfront": ["TEMPEST: 7 > 9 bolts", "cost -30%"],
@@ -3939,6 +4119,26 @@ func _army(delta: float) -> void:
 					shells.append({"pos": u.pos + Vector2(0, -12),
 						"vel": (prey.pos + Vector2(0, -8) - u.pos).normalized() * 140.0,
 						"life": 3.0, "heavy": u.kind == "tank", "friendly": true})
+			else:
+				# no one left to shoot — the madness turns on the city itself
+				u.cd -= delta
+				if u.cd <= 0.0:
+					var mb2 = null
+					var mbd := 1e9
+					for b in buildings:
+						if not b.dead and b.dying <= 0.0 and b.topple == 0.0:
+							var dbx2: float = absf(b.x + b.w * 0.5 - u.pos.x)
+							if dbx2 < mbd:
+								mbd = dbx2
+								mb2 = b
+					if mb2 != null and mbd < 240.0:
+						u.cd = 0.8
+						u.mf = 0.07
+						mb2.hp -= 6.0 if u.kind == "tank" else 3.5
+						_carve(mb2, Vector2(clampf(u.pos.x + signf(mb2.x - u.pos.x) * mbd, mb2.x + 3.0, mb2.x + mb2.w - 3.0),
+							-randf_range(6.0, mb2.cur_h * 0.6)), randf_range(2.0, 3.5))
+						if mb2.hp <= 0.0:
+							_collapse(mb2)
 			continue
 		var dx: float = pos.x - u.pos.x
 		var slow: float = u.get("slow", 1.0)
@@ -4053,7 +4253,7 @@ func _army(delta: float) -> void:
 				var speed: float = 120.0 if u.kind in ["police", "soldier", "militia"] else 165.0
 				var dirv := (lead - origin).normalized()
 				if blackout_t > 0.0:
-					dirv = dirv.rotated(randf_range(-0.55, 0.55))  # blind in the dark
+					dirv = dirv.rotated(randf_range(-0.32, 0.32))  # blind in the dark
 				elif sun_eaten or dark_perm > 0.0:
 					dirv = dirv.rotated(randf_range(-0.3, 0.3))
 				if nodes.has("dirge") and (u.pos - pos).length() < 220.0:
@@ -4121,7 +4321,8 @@ func _army(delta: float) -> void:
 			continue
 		if s.pos.distance_to(pos) < radius:
 			s.life = 0.0
-			hp -= (6.0 if s.heavy else 3.0) * dmg_taken_mult * defense
+			var smallarm: float = 0.5 if (not s.heavy and character in ["rider", "drowned"]) else 1.0
+			hp -= (6.0 if s.heavy else 3.0) * dmg_taken_mult * defense * smallarm
 			hits_taken += 1
 			combo = max(1.0, combo - 1.0)
 			shake = 6.0
@@ -4459,7 +4660,7 @@ func _hud_update() -> void:
 			hud.obj.text += "    ·    DARE: %s%s" % [bonus_obj.to_upper(), " ✓" if bonus_met else ""]
 	match character:
 		"keraunos":
-			var need: float = 25.0 if nodes.has("conductor") else (40.0 if branch == "skyfall" else (70.0 if nodes.has("stormfront") else 100.0))
+			var need: float = 25.0 if nodes.has("conductor") else (40.0 if branch == "skyfall" else (60.0 if nodes.has("stormfront") else 80.0))
 			hud.biolbl.text = ("STORM READY — RMB" if meter >= need else "STORM — RMB at %d" % int(need))
 			hud.bio.size.x = 152.0 * clampf(meter / 100.0, 0.0, 1.0)
 		"tzitzimitl":
@@ -4549,6 +4750,12 @@ func _draw() -> void:
 		draw_circle(o.pos, rr + 3.0, Color(0.5, 1.2, 2.0, 0.18))
 		draw_circle(o.pos, rr, Color(1.2, 1.9, 2.5))
 		draw_circle(o.pos, rr * 0.5, Color(2.2, 2.4, 2.8))
+	for dw in deluges:
+		var wx5: float = dw.x
+		draw_colored_polygon(PackedVector2Array([Vector2(wx5 - 22 * dw.dir, 0), Vector2(wx5 - 8 * dw.dir, -34),
+			Vector2(wx5 + 6 * dw.dir, -44 + sin(t * 9.0) * 3.0), Vector2(wx5 + 14 * dw.dir, -20), Vector2(wx5 + 16 * dw.dir, 0)]),
+			Color(0.10, 0.32, 0.36, 0.85))
+		draw_circle(Vector2(wx5 + 6 * dw.dir, -44 + sin(t * 9.0) * 3.0), 6.0, Color(0.55, 0.85, 0.85, 0.5))
 	for o in eorbs:
 		var oc: Color = EORB_COLS.get(o.kind, Color(1.6, 1.2, 0.9))
 		draw_circle(o.pos, 3.4, Color(oc.r, oc.g, oc.b, 0.18))

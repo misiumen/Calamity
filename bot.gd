@@ -23,6 +23,8 @@ var retarget := 0.0
 var click_cd := 0.0
 var lmb_down := false
 var ended_seen := false
+var release_lmb := false
+var release_rmb := false
 
 func _ready() -> void:
 	active = OS.get_environment("CAL_BOT") != ""
@@ -103,6 +105,14 @@ func _drive_map(map: Node) -> void:
 func _drive_battle(m: Node, delta: float) -> void:
 	click_cd -= delta
 	retarget -= delta
+	# finish last tick's click — a press must survive one full frame to be seen
+	if release_lmb:
+		release_lmb = false
+		if not lmb_down:
+			_mouse(MOUSE_BUTTON_LEFT, false)
+	if release_rmb:
+		release_rmb = false
+		_mouse(MOUSE_BUTTON_RIGHT, false)
 	# skip the arrival cinematic (and reset grip state — scene changes drop real input)
 	if m.get("intro_t") != null and m.intro_t > 0.0:
 		lmb_down = false
@@ -186,10 +196,10 @@ func _drive_battle(m: Node, delta: float) -> void:
 	elif click_cd <= 0.0:
 		click_cd = randf_range(0.5, 1.1)
 		_mouse(MOUSE_BUTTON_LEFT, true)
-		_mouse(MOUSE_BUTTON_LEFT, false)
+		release_lmb = true
 	if m.meter >= 85.0 and randf() < 0.05:
 		_mouse(MOUSE_BUTTON_RIGHT, true)
-		_mouse(MOUSE_BUTTON_RIGHT, false)
+		release_rmb = true
 
 func _log(s: String) -> void:
 	report.segments.append({"t": int(t_total), "e": s})

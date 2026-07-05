@@ -266,6 +266,149 @@ func _draw() -> void:
 			_menu_root_mock()
 		"menu_char":
 			_menu_char_mock()
+		"menu2_root":
+			_menu2_root_mock()
+		"menu2_char":
+			_menu2_char_mock()
+
+func _menu2_scene() -> void:
+	for i in 20:
+		var f: float = i / 19.0
+		draw_rect(Rect2(0, f * 200.0, 640, 11), Color(0.06, 0.03, 0.10).lerp(Color(0.45, 0.13, 0.16), f))
+	for i in 24:
+		var bw := 10.0 + fmod(i * 23.3, 26.0)
+		var bh := 12.0 + fmod(i * 37.7, 42.0)
+		draw_rect(Rect2(i * 27.0, 208.0 - bh, bw, bh), Color("#170f1e"))
+		if i % 4 == 0:
+			draw_circle(Vector2(i * 27.0 + bw * 0.5, 206.0 - bh), 4.0, Color(1.9, 0.8, 0.25, 0.4))
+	draw_rect(Rect2(0, 205, 640, 155), Color("#0d0916"))
+	for sm in 3:
+		for p in 5:
+			draw_circle(Vector2(120 + sm * 190 + sin(p * 1.7) * 6.0, 195.0 - p * 14.0), 7.0 + p * 2.5,
+				Color(0.10, 0.07, 0.12, 0.5 - p * 0.08))
+	for e in 18:
+		draw_rect(Rect2(fmod(e * 97.3, 640.0), 40.0 + fmod(e * 53.7, 280.0), 1.5, 1.5), Color(1.9, 0.7, 0.3, 0.5))
+
+func _bold_f() -> FontFile:
+	return load("res://art/Silkscreen-Bold.ttf")
+
+func _menu2_root_mock() -> void:
+	_menu2_scene()
+	var gx := [180.0, 250.0, 320.0, 390.0, 460.0]
+	var silh := Color("#080510")
+	draw_circle(Vector2(gx[0], 222.0), 7.0, silh)
+	draw_rect(Rect2(gx[1] - 4, 204.0, 8, 26), silh)
+	for hh in 3:
+		draw_circle(Vector2(gx[1] + (hh - 1) * 5.0, 202.0), 2.2, silh)
+	var prev := Vector2(gx[2] - 12, 228.0)
+	for sgm in 7:
+		var f2: float = sgm / 6.0
+		var npt := Vector2(gx[2] - 12 + f2 * 24.0, 228.0 - sin(f2 * PI) * 14.0)
+		draw_line(prev, npt, silh, 3.0)
+		prev = npt
+	draw_colored_polygon(PackedVector2Array([Vector2(gx[3] - 6, 230), Vector2(gx[3] - 4, 206),
+		Vector2(gx[3] + 4, 206), Vector2(gx[3] + 6, 230)]), silh)
+	draw_circle(Vector2(gx[3] - 1.5, 211.0), 0.9, Color(1.3, 2.4, 2.2))
+	draw_circle(Vector2(gx[3] + 1.5, 211.0), 0.9, Color(1.3, 2.4, 2.2))
+	draw_colored_polygon(PackedVector2Array([Vector2(gx[4] - 8, 230), Vector2(gx[4] - 6, 212),
+		Vector2(gx[4], 206), Vector2(gx[4] + 7, 214), Vector2(gx[4] + 8, 230)]), silh)
+	draw_string(ui_font, Vector2(0, 60), "C A L A M I T Y", HORIZONTAL_ALIGNMENT_CENTER, 640, 30, Color(1.9, 0.45, 0.5))
+	draw_string(ui_font, Vector2(0, 80), "you are the apocalypse", HORIZONTAL_ALIGNMENT_CENTER, 640, 9, Color(0.75, 0.68, 0.8))
+	draw_rect(Rect2(60, 96, 520, 4), Color("#241a2c"))
+	var titles := [["NEW CRUSADE", true], ["CONTINUE", false], ["SKIRMISH", false]]
+	for i in 3:
+		var bx: float = 130.0 + i * 190.0
+		var hot: bool = titles[i][1]
+		var cloth := Color(0.46, 0.11, 0.14) if hot else Color(0.24, 0.18, 0.30)
+		var pts := PackedVector2Array([Vector2(bx - 46, 100)])
+		pts.append(Vector2(bx + 46, 100))
+		for wv in 5:
+			pts.append(Vector2(bx + 46 - wv * 4.0, 208.0 + sin(wv * 1.9 + i) * 5.0 + (wv % 2) * 7.0))
+		for wv in 5:
+			pts.append(Vector2(bx - 14 - wv * 4.0, 214.0 - sin(wv * 1.7 + i) * 5.0 - (wv % 2) * 7.0))
+		draw_colored_polygon(pts, cloth)
+		draw_rect(Rect2(bx - 46, 100, 92, 5), Color("#3a2c1c"))
+		draw_line(Vector2(bx - 46, 105), Vector2(bx - 46, 190), cloth.darkened(0.35), 2.0)
+		draw_line(Vector2(bx + 46, 105), Vector2(bx + 46, 186), cloth.darkened(0.35), 2.0)
+		draw_circle(Vector2(bx, 130), 11.0, cloth.darkened(0.3))
+		draw_arc(Vector2(bx, 130), 11.0, 0, TAU, 16, Color(1.7, 1.3, 0.7, 0.5), 1.0)
+		draw_string(ui_font, Vector2(bx - 44, 160), titles[i][0], HORIZONTAL_ALIGNMENT_CENTER, 88, 10,
+			Color(1.9, 0.8, 0.6) if hot else Color(0.85, 0.8, 0.9))
+		if hot:
+			for fe in 6:
+				var fx3: float = bx - 36 + fe * 13.0
+				draw_circle(Vector2(fx3, 206.0 + (fe % 2) * 6.0), 2.5, Color(2.0, 0.9, 0.3, 0.7))
+			draw_string(ui_font, Vector2(bx - 44, 176), "act I - III", HORIZONTAL_ALIGNMENT_CENTER, 88, 6, Color(1.5, 1.0, 0.7))
+	draw_string(ui_font, Vector2(0, 262), "the five stand on the ridge, watching their work", HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(0.6, 0.55, 0.7))
+
+func _menu2_char_mock() -> void:
+	_menu2_scene()
+	draw_string(ui_font, Vector2(0, 40), "THE PANTHEON", HORIZONTAL_ALIGNMENT_CENTER, 640, 17, Color(1.9, 0.45, 0.5))
+	draw_string(ui_font, Vector2(0, 56), "no cards. the gods ARE the menu. click one.", HORIZONTAL_ALIGNMENT_CENTER, 640, 8, Color(0.75, 0.68, 0.8))
+	draw_rect(Rect2(0, 268, 640, 92), Color("#0a0714"))
+	for cr in 10:
+		draw_rect(Rect2(cr * 68.0, 264.0 + fmod(cr * 7.7, 8.0), 60.0, 10.0), Color("#0d0918"))
+	var names := ["THE SWARM", "KERAUNOS", "TZITZIMITL", "THE DROWNED", "PALE RIDER"]
+	var cols := [Color(1.8, 0.4, 0.45), Color(0.5, 1.5, 2.0), Color(1.9, 1.2, 0.3), Color(0.4, 1.6, 1.5), Color(1.7, 1.5, 0.7)]
+	for i in 5:
+		var gx2: float = 76.0 + i * 122.0
+		var gy := 240.0
+		var hot: bool = i == 2
+		if hot:
+			draw_circle(Vector2(gx2, gy - 40), 58.0, Color(cols[i].r, cols[i].g, cols[i].b, 0.07))
+			draw_rect(Rect2(gx2 - 40, gy + 24, 80, 3), Color(cols[i].r, cols[i].g, cols[i].b, 0.25))
+		match i:
+			0:
+				draw_circle(Vector2(gx2, gy - 38), 26.0, Color(0.9, 0.12, 0.18, 0.13))
+				draw_circle(Vector2(gx2, gy - 38), 17.0, Color("#20040e"))
+				for mm in 22:
+					var mp2 := Vector2(gx2, gy - 38) + Vector2(cos(mm * 2.4), sin(mm * 3.1)) * (9.0 + fmod(mm * 5.3, 15.0))
+					draw_line(mp2, mp2 + Vector2(2.5, 1), Color(1.6, 0.35, 0.4), 1.0)
+				draw_circle(Vector2(gx2 + 8, gy - 44), 3.5, Color(1.8, 1.1, 0.3))
+			1:
+				draw_circle(Vector2(gx2, gy - 26), 15.0, Color("#0e0f18"))
+				for hh2 in 3:
+					var hp4 := Vector2(gx2 + (hh2 - 1) * 13.0, gy - 62.0)
+					draw_line(Vector2(gx2 + (hh2 - 1) * 5.0, gy - 38.0), hp4, Color("#0e0f18"), 4.0)
+					draw_circle(hp4, 4.0, Color("#161826"))
+					draw_circle(hp4 + Vector2(2, 0), 1.3, Color(1.2, 2.0, 2.6))
+				for wg in [-1.0, 1.0]:
+					draw_colored_polygon(PackedVector2Array([Vector2(gx2 + wg * 8, gy - 34),
+						Vector2(gx2 + wg * 40, gy - 58), Vector2(gx2 + wg * 30, gy - 24)]), Color(0.05, 0.06, 0.11, 0.9))
+			2:
+				var prev2 := Vector2(gx2 - 30, gy)
+				for sgm2 in 11:
+					var f4: float = sgm2 / 10.0
+					var npt2 := Vector2(gx2 - 30 + f4 * 60.0, gy - sin(f4 * PI) * 46.0 + sin(f4 * 9.0) * 3.0)
+					draw_line(prev2, npt2, Color(0.10, 0.48, 0.47), 7.0 * (1.0 - absf(f4 - 0.5)))
+					prev2 = npt2
+				draw_circle(prev2 + Vector2(2, -4), 5.0, Color(0.23, 0.72, 0.66))
+				draw_circle(prev2 + Vector2(4, -5), 1.5, Color(2.4, 1.5, 0.3))
+				for fth in 4:
+					draw_line(Vector2(gx2 - 18 + fth * 10.0, gy - 42.0), Vector2(gx2 - 22 + fth * 10.0, gy - 52.0),
+						Color(0.9, 0.35, 0.2), 1.5)
+			3:
+				draw_colored_polygon(PackedVector2Array([Vector2(gx2 - 14, gy), Vector2(gx2 - 12, gy - 34),
+					Vector2(gx2 - 4, gy - 52), Vector2(gx2 + 5, gy - 51), Vector2(gx2 + 12, gy - 32), Vector2(gx2 + 14, gy)]),
+					Color(0.02, 0.08, 0.10))
+				for tn2 in 6:
+					draw_line(Vector2(gx2 + (tn2 - 2.5) * 3.2, gy - 40), Vector2(gx2 + (tn2 - 2.5) * 4.0, gy - 28 + (tn2 % 2) * 4),
+						Color(0.04, 0.13, 0.15), 2.0)
+				draw_circle(Vector2(gx2 - 3, gy - 44), 1.6, Color(1.3, 2.4, 2.2))
+				draw_circle(Vector2(gx2 + 3, gy - 44), 1.6, Color(1.3, 2.4, 2.2))
+			4:
+				draw_colored_polygon(PackedVector2Array([Vector2(gx2 + 16, gy), Vector2(gx2 + 17, gy - 26),
+					Vector2(gx2 + 7, gy - 44), Vector2(gx2 - 3, gy - 48), Vector2(gx2 - 15, gy - 34),
+					Vector2(gx2 - 22, gy - 10), Vector2(gx2 - 17, gy)]), Color(0.075, 0.06, 0.09))
+				draw_circle(Vector2(gx2 - 2, gy - 42), 3.6, Color(0.88, 0.83, 0.66))
+				draw_arc(Vector2(gx2 + 2, gy - 54), 13.0, -0.4, 1.5, 12, Color(0.97, 0.93, 0.78), 2.4)
+				for lg in 3:
+					draw_line(Vector2(gx2 - 10 + lg * 8.0, gy), Vector2(gx2 - 10 + lg * 8.0, gy - 10), Color(0.88, 0.83, 0.66), 2.0)
+		draw_string(ui_font, Vector2(gx2 - 55, gy + 44), names[i], HORIZONTAL_ALIGNMENT_CENTER, 110, 9,
+			cols[i] if hot else Color(0.8, 0.75, 0.85))
+		if hot:
+			draw_string(ui_font, Vector2(gx2 - 55, gy + 58), "eclipse serpent", HORIZONTAL_ALIGNMENT_CENTER, 110, 7, Color(0.85, 0.8, 0.9))
+			draw_string(ui_font, Vector2(gx2 - 55, gy + 70), "lance dives - eat the sun", HORIZONTAL_ALIGNMENT_CENTER, 110, 6, Color(0.7, 0.65, 0.75))
 
 func _frame(r: Rect2, bord: Color, fill: Color) -> void:
 	draw_rect(r, fill)
