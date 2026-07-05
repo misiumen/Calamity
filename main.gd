@@ -137,6 +137,7 @@ var over_t := 0.0                # time since the end screen fell
 var end_label := ""              # crusade end-card label (drawn, not a Button)
 var end_win := false
 var end_pending := false         # clicked before the card armed — fire on arm
+var flavor_t := 0.0              # arrival flavor line lingers briefly, then leaves
 var fire_lights: Array = []      # pooled PointLight2D for blazes
 var flash_light: PointLight2D
 var flak_cd := 3.0
@@ -1368,6 +1369,19 @@ func _process(delta: float) -> void:
 			get_tree().quit()
 	if draft_open:
 		return
+	# end screens breathe on a real clock (arm delay, ledger reveal)
+	if over:
+		over_t += delta
+		if end_pending and over_t >= 0.8:
+			end_pending = false
+			_end_advance()
+	# the arrival flavor line steps aside after a few seconds
+	if flavor_t > 0.0 and not over:
+		flavor_t -= delta
+		hud.stats.modulate.a = clampf(flavor_t, 0.0, 1.0)
+		if flavor_t <= 0.0:
+			hud.stats.text = ""
+			hud.stats.modulate.a = 1.0
 	# arrival — the calamity walks in before the war starts
 	if intro_t > 0.0:
 		intro_t -= delta
@@ -4644,6 +4658,7 @@ func _hud_update() -> void:
 	hud.lb_bot.position.y = 360.0 - 44.0 * letterbox
 	hud.lb_bot.size.y = 44.0 * letterbox
 	if over:
+		hud.stats.modulate.a = 1.0
 		hud.stats.visible = over_t > 0.6
 		hud.sub.visible = over_t > 0.25
 	hud.citylbl.text = "CITY DEVOURED — %d%%" % int(_eaten_frac() * 100)
