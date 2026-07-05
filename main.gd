@@ -135,6 +135,7 @@ var milestone_i := 0             # devour milestones fired
 var over_t := 0.0                # time since the end screen fell
 var end_label := ""              # crusade end-card label (drawn, not a Button)
 var end_win := false
+var end_pending := false         # clicked before the card armed — fire on arm
 var fire_lights: Array = []      # pooled PointLight2D for blazes
 var flash_light: PointLight2D
 var flak_cd := 3.0
@@ -2716,9 +2717,9 @@ func _rider(delta: float) -> void:
 	# SCYTHE — the pale blade arcs where you point
 	var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	if lmb and not lmb_prev and lmb_cd <= 0.0:
-		lmb_cd = 0.8
+		lmb_cd = 0.7
 		var o: Vector2 = pos + Vector2(0, -10)
-		var reach: float = 52.0 * growth
+		var reach: float = 68.0 * growth
 		scythe_ang = (aim - o).angle()
 		scythe_t = 0.18
 		_sfx("shing")
@@ -2727,7 +2728,7 @@ func _rider(delta: float) -> void:
 			if u.kind == "carcass":
 				continue
 			var d2: Vector2 = u.pos + Vector2(0, -8) - o
-			if d2.length() < reach and absf(angle_difference(d2.angle(), scythe_ang)) < 0.95:
+			if d2.length() < reach and absf(angle_difference(d2.angle(), scythe_ang)) < 1.1:
 				u.hp = u.get("hp", 1) - 2
 				_boom(u.pos + Vector2(0, -8), 6, Color(0.85, 0.9, 0.65), 70.0)
 				if u.hp <= 0:
@@ -2739,7 +2740,7 @@ func _rider(delta: float) -> void:
 		units = units.filter(func(u2): return not u2.get("dead", false))
 		for pe in people:
 			var dp: Vector2 = Vector2(pe.pos.x, -4) - o
-			if dp.length() < reach and absf(angle_difference(dp.angle(), scythe_ang)) < 0.95:
+			if dp.length() < reach and absf(angle_difference(dp.angle(), scythe_ang)) < 1.1:
 				pe.dead = true
 				score_f += 20.0 * combo * TIER_MULT[tier]
 				_gout(Vector2(pe.pos.x, -6), "death", 2.0, 1)
@@ -2752,16 +2753,17 @@ func _rider(delta: float) -> void:
 				continue
 			var tip: Vector2 = o + Vector2.from_angle(scythe_ang) * reach * 0.8
 			if tip.x > b.x - 4.0 and tip.x < b.x + b.w + 4.0 and tip.y > -b.cur_h - 8.0:
-				b.hp -= 5.0
-				for k in 3:
-					_carve(b, o + Vector2.from_angle(scythe_ang + (k - 1) * 0.3) * reach * randf_range(0.55, 0.95),
-						randf_range(2.5, 4.0))
+				b.hp -= 9.0
+				for k in 4:
+					_carve(b, o + Vector2.from_angle(scythe_ang + (k - 1.5) * 0.3) * reach * randf_range(0.5, 0.95),
+						randf_range(3.0, 5.0))
 				_feed("mass", 1.2)
 				score_f += 6.0 * combo * TIER_MULT[tier]
 				shake = maxf(shake, 5.0)
 				if b.hp <= 0.0:
 					_collapse(b)
 				break
+		_hit_props(o + Vector2.from_angle(scythe_ang) * reach * 0.6, reach * 0.55)
 	# REAPING — every infected thing dies and rises NOW
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and rmb_cd <= 0.0 and meter >= 80.0:
 		rmb_cd = 1.5
@@ -2804,9 +2806,9 @@ func _allies_update(delta: float) -> void:
 		var speed: float = 90.0 if nodes.has("drill") else 46.0
 		if a.kind == "whelp":
 			speed = 26.0
-		# find prey
+		# find prey — the risen are a demolition crew first, soldiers second
 		var prey = null
-		var pd := 320.0
+		var pd: float = 90.0 if a.kind in ["risen", "cultist"] else (200.0 if a.kind == "risen_soldier" else 320.0)
 		for u in units:
 			if u.get("mad", false) or u.kind == "carcass":
 				continue
@@ -2872,8 +2874,8 @@ func _allies_update(delta: float) -> void:
 							_kill_unit(prey)
 		# dead hands against the walls
 		if raze_b != null and a.cd <= 0.0 and absf(a.pos.x - (raze_b.x + raze_b.w * 0.5)) < raze_b.w * 0.5 + 8.0:
-			a.cd = 1.0
-			raze_b.hp -= 1.5
+			a.cd = 0.75
+			raze_b.hp -= 2.6
 			_carve(raze_b, Vector2(a.pos.x + randf_range(-5, 5), randf_range(-16.0, -4.0)), randf_range(2.0, 3.5))
 			score_f += 2.0 * combo * TIER_MULT[tier]
 			_feed("death", 0.35)
@@ -3260,6 +3262,12 @@ func _collapse(b: Dictionary) -> void:
 	_sfx("crumble")
 
 func _hit_props(p: Vector2, r: float) -> void:
+	# no creature is exempt
+	for cr in critters:
+		if not cr.dead and absf(cr.pos.x - p.x) < r and p.y > -34.0:
+			cr.dead = true
+			_boom(cr.pos + Vector2(0, -3), 4, Color(0.8, 0.4, 0.4), 40.0)
+			score_f += 5.0 * combo
 	# evac buses — three hits of armor, a feast inside
 	for bus in buses:
 		if bus.get("dead", false) or absf(bus.x - p.x) > r + 14.0 or p.y < -22.0:
@@ -3608,8 +3616,8 @@ class DraftUI extends Control:
 		if not visible:
 			return
 		if not m.draft_open:
-			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT 					and Rect2(220, 222, 200, 40).has_point(e.position):
-				m._end_advance()
+			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+				m._end_click()
 				accept_event()
 			return
 		if e is InputEventMouseMotion:
@@ -4249,6 +4257,12 @@ func _crusade_button(label: String, win: bool) -> void:
 	end_label = label
 	end_win = win
 
+func _end_click() -> void:
+	if over_t >= 0.8:
+		_end_advance()
+	else:
+		end_pending = true
+
 func _end_advance() -> void:
 	if end_label == "" or over_t < 0.8:
 		return
@@ -4373,7 +4387,7 @@ func _build_hud() -> void:
 		"drowned":
 			help.text = "A/D — wade, W — lurch.  LMB — madden a mind (units turn, crowds riot).  RMB — call the fishmen.  ESC — menu."
 		"rider":
-			help.text = "A/D — ride, W — rear.  fog infects all near.  LMB — scythe.  E — rally the dead.  RMB — REAPING.  ESC — menu."
+			help.text = "A/D — ride, W — leap.  fog infects all near.  LMB — scythe (wide).  E — rally the dead.  RMB — REAPING.  ESC — menu."
 		_:
 			help.text = "WASD — fly.  HOLD LMB — tendrils: chew, snatch, reel.  RMB — arc lash / evolved skill.  R — restart.  ESC — menu."
 
@@ -5013,6 +5027,8 @@ func _draw_actors() -> void:
 		draw_texture(tx, Vector2(pr.x - tx.get_width() * 0.35, -tx.get_height() * 0.7), Color(0.8, 0.75, 0.9))
 	# critters
 	for cr in critters:
+		if cr.dead:
+			continue
 		var cp: Vector2 = cr.pos
 		match cr.kind:
 			"pigeon":
@@ -5668,7 +5684,7 @@ func _draw_rider() -> void:
 	if scythe_t > 0.0:
 		var o2: Vector2 = pos + Vector2(0, -10)
 		var al: float = scythe_t / 0.18
-		var reach2: float = 52.0 * growth
+		var reach2: float = 68.0 * growth
 		draw_arc(o2, reach2 * 0.85, scythe_ang - 0.95, scythe_ang + 0.95, 18, Color(1.8, 1.7, 1.2, al * 0.8), 3.0)
 		draw_arc(o2, reach2 * 0.65, scythe_ang - 0.7, scythe_ang + 0.7, 14, Color(1.4, 1.4, 1.0, al * 0.4), 2.0)
 	if randf() < 0.2:
