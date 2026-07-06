@@ -35,7 +35,7 @@ const CITY_DEFS := {
 		"mix": {"ziggurat": 0.26, "shrine": 0.34, "house": 0.4},
 		"facade_sheet": "res://art/near-buildings-bg.png", "house_art": [],
 		"far_tex": "res://art/cities/teotl/back.png", "mid_tex": "res://art/cities/teotl/middle.png",
-		"far_scale": 0.55, "mid_scale": 0.7, "mid_hang": true, "cit_kind": "ziggurat"},
+		"far_scale": 0.55, "mid_scale": 0.7, "mid_hang": true, "no_far": true, "cit_kind": "ziggurat"},
 	"maren": {"name": "PORT MAREN", "tint": Color(0.85, 0.95, 1.1), "defense": 1.1,
 		"sky": [Color("#0a0e16"), Color("#131c2c"), Color("#22344a"), Color("#3a566a"), Color("#587a8a")],
 		"big_chance": 0.2, "gap_min": 18.0, "gap_max": 60.0, "spawn_mult": 1.2,
@@ -541,7 +541,8 @@ func _apply_campaign() -> void:
 	if Global.act == 2 and node_kind != "prologue" and Global.heralds_slain.size() < Global.herald_queue.size() \
 			and Global.roar >= Global.ROAR_GATES[Global.heralds_slain.size()]:
 		herald_due = Global.herald_queue[Global.heralds_slain.size()]
-		herald_timer = 40.0
+		var overflow: float = Global.roar - Global.ROAR_GATES[Global.heralds_slain.size()]
+		herald_timer = clampf(24.0 - overflow * 0.004, 8.0, 24.0)
 	# stolen powers persist
 	for g in Global.grafts:
 		match g:
@@ -571,6 +572,7 @@ func _apply_campaign() -> void:
 	nodes = Global.c_nodes.duplicate()
 	bio_stage = Global.c_bio_stage
 	essence_eaten = Global.c_essence
+	bio = essence_eaten
 	# act 1 starts you SMALL — a whisper of what you'll be
 	if Global.act == 1:
 		growth_mult = [0.7, 0.8, 0.88, 0.94, 1.0][mini(4, Global.razed.size())]
@@ -1413,6 +1415,7 @@ func _process(delta: float) -> void:
 			letterbox = 0.0
 			hud.msg.text = ""
 			hud.sub.text = ""
+			flavor_t = 4.0
 			lmb_prev = true
 		_hud_update()
 		queue_redraw()
@@ -5107,6 +5110,17 @@ func _draw_backdrop(left: float, right: float, cx: float) -> void:
 	draw_rect(Rect2(left, -80, right - left, 80), Color(0.85, 0.3, 0.5, 0.14))
 	# far layer, seated on the horizon
 	var kowloon := Global.city == "kowloon"
+	if city_def.get("no_far", false):
+		# this pack's far texture carries a baked sky — canopy + glow suffice
+		var mw0: float = tex_mid.get_width() * city_def.mid_scale
+		var mh0: float = tex_mid.get_height() * city_def.mid_scale
+		var mtop0: float = (cam.position.y - 190.0 / cam.zoom.y - mh0 * 0.45) if city_def.get("mid_hang", false) else -mh0
+		var xo0: float = -cx * 0.4
+		var xi0: float = floor((left - xo0) / mw0) * mw0 + xo0
+		while xi0 < right:
+			draw_texture_rect(tex_mid, Rect2(xi0, mtop0, mw0, mh0), false, Color(0.55, 0.48, 0.75, 1))
+			xi0 += mw0
+		return
 	var far_tint := Color(0.36, 0.3, 0.6, 1) if kowloon else Color(0.5, 0.45, 0.62, 1)
 	var sw: float = tex_sky_a.get_width() * city_def.far_scale
 	var sh: float = tex_sky_a.get_height() * city_def.far_scale
