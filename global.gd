@@ -45,6 +45,7 @@ func goto(path: String) -> void:
 	fade_target = 1.0
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	var fl := CanvasLayer.new()
 	fl.layer = 100
 	add_child(fl)

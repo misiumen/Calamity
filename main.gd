@@ -182,6 +182,7 @@ var doom_p := Vector2.ZERO
 var doom_t := 0.0
 var prologue := false
 var prol_beats: Array = []
+var prol_base := {}              # per-beat counter baseline — beats track their own work
 var prol_i := 0
 var madden_count := 0
 var risen_count := 0
@@ -626,16 +627,16 @@ const HERALD_DEFS := {
 }
 
 const PROLOGUE_OPEN := {
-	"swarm": ["The drought year, the villages prayed the locusts would pass them by.",
-		"Something in the cloud heard. Something in the cloud answered."],
-	"keraunos": ["The mountain shrines went cold. No one fed the storm its honors.",
-		"High in the anvil clouds, one throat woke. Then another. Then nine."],
-	"tzitzimitl": ["They dug the temple out of the jungle and lit it with floodlights.",
-		"The seal had one purpose. The archaeologists called it decoration."],
-	"drowned": ["The bay gave them fish for nine generations. They gave it poison.",
-		"The lighthouse keeper heard singing under the waterline. He opened the sea gate."],
-	"rider": ["When the plague came, the village burned its sick to save itself.",
-		"The ash was still warm when the hoofbeats started."],
+	"swarm": ["A dry season. A thin harvest. A sky the color of rust.",
+		"Beneath the fields, something that had slept for nine hundred years tasted hunger again."],
+	"keraunos": ["The last storm-priest died in winter. Nobody took the mountain road after that.",
+		"The offerings stopped. The sky kept count."],
+	"tzitzimitl": ["The dig was funded, fenced and floodlit. The tablets said STOP in four dead languages.",
+		"They put the tablets in a crate."],
+	"drowned": ["Nine generations of nets, then the refinery came, and the bay turned black.",
+		"Something at the bottom opened one eye."],
+	"rider": ["The quarantine failed on the ninth day. They lit the pyres at dusk.",
+		"By midnight, the smoke had learned to walk."],
 }
 const PROLOGUE_DEFS := {
 	"swarm": {"city": "ashport", "beats": [
@@ -700,6 +701,10 @@ func _setup_prologue() -> void:
 	if character == "drowned":
 		meter = 40.0
 
+func _prol_snapshot() -> void:
+	prol_base = {"people": people_killed, "lamps": lamps_down, "buildings": buildings_razed,
+		"essence": essence_eaten, "madden": madden_count, "kills": unit_kills, "risen": risen_count}
+
 func _prologue_check() -> void:
 	if prol_i >= prol_beats.size() or caption_layer != null:
 		return
@@ -714,18 +719,21 @@ func _prologue_check() -> void:
 			for i in 3:
 				units.append({"kind": "police", "pos": Vector2(pos.x + 120.0 + i * 26.0, 0),
 					"cd": randf_range(0.6, 1.2), "hp": 1})
+	if prol_base.is_empty():
+		_prol_snapshot()
 	var progress: float = 0.0
 	match beat.goal:
-		"people": progress = people_killed
-		"lamps": progress = lamps_down
-		"buildings": progress = buildings_razed
-		"essence": progress = essence_eaten - essence_start
-		"madden": progress = madden_count
-		"kills": progress = unit_kills
-		"risen": progress = risen_count
+		"people": progress = people_killed - prol_base.people
+		"lamps": progress = lamps_down - prol_base.lamps
+		"buildings": progress = buildings_razed - prol_base.buildings
+		"essence": progress = essence_eaten - prol_base.essence
+		"madden": progress = madden_count - prol_base.madden
+		"kills": progress = unit_kills - prol_base.kills
+		"risen": progress = risen_count - prol_base.risen
 	hud.obj.text = "%s — %d / %d" % [beat.goal.to_upper(), int(progress), beat.n]
 	if progress >= beat.n:
 		prol_i += 1
+		_prol_snapshot()
 		growth_mult = minf(1.0, growth_mult + 0.18)
 		growth = minf(growth_cap, growth_mult * (1.0 + minf(0.75, essence_eaten / 900.0)))
 		_sfx("pick")
@@ -1942,6 +1950,7 @@ var bio := 0.0
 var bio_stage := 0
 var draft_open := false
 var draft_ui: Control = null
+var pause_ui: Control = null
 var pods: Array = []             # {b, p(local), t_left, tick}
 var rmb_cd := 0.0
 var threat_mult := 1.0
@@ -3794,6 +3803,65 @@ func _pick_draft(id: String) -> void:
 	_pop(pos + Vector2(0, -24), picked_name, Color(2.0, 0.6, 0.7))
 	radius = minf(24.0, radius + 2.0)  # visible growth per evolution
 
+class PauseUI extends Control:
+	var m: Node2D
+	var hover := -1
+	const OPTS := [["RESUME", "the night is young"],
+		["RESTART THE NIGHT", "same city, fresh body"],
+		["ABANDON", "back to the pantheon — crusade is saved"]]
+	func _init(main_ref: Node2D) -> void:
+		m = main_ref
+		size = Vector2(640, 360)
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		process_mode = Node.PROCESS_MODE_ALWAYS
+		visible = false
+	func _card(i: int) -> Rect2:
+		return Rect2(200, 108 + i * 66, 240, 52)
+	func _process(_d: float) -> void:
+		if visible:
+			queue_redraw()
+	func _input(e: InputEvent) -> void:
+		if not visible:
+			return
+		if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
+			m._pause_action(0)
+			get_viewport().set_input_as_handled()
+	func _gui_input(e: InputEvent) -> void:
+		if not visible:
+			return
+		if e is InputEventMouseMotion:
+			hover = -1
+			for i in 3:
+				if _card(i).has_point(e.position):
+					hover = i
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			for i in 3:
+				if _card(i).has_point(e.position):
+					m._pause_action(i)
+					accept_event()
+					return
+	func _draw() -> void:
+		var f: FontFile = m.ui_font
+		draw_rect(Rect2(0, 0, 640, 360), Color(0.02, 0.0, 0.05, 0.85))
+		draw_string(f, Vector2(0, 78), "THE RUIN RESTS", HORIZONTAL_ALIGNMENT_CENTER, 640, 16, Color(1.9, 0.5, 0.55))
+		for i in 3:
+			var r := _card(i)
+			var hov: bool = hover == i
+			if hov:
+				r.position.y -= 3.0
+				draw_rect(Rect2(r.position - Vector2(3, 3), r.size + Vector2(6, 6)), Color(1.9, 0.5, 0.5, 0.10))
+			var bord: Color = Color(1.9, 0.6, 0.6) if hov else Color(0.4, 0.32, 0.45)
+			draw_rect(r, Color("#151020"))
+			for edge in [Rect2(r.position, Vector2(r.size.x, 2)), Rect2(r.position + Vector2(0, r.size.y - 2), Vector2(r.size.x, 2)),
+					Rect2(r.position, Vector2(2, r.size.y)), Rect2(r.position + Vector2(r.size.x - 2, 0), Vector2(2, r.size.y))]:
+				draw_rect(edge, bord)
+			for c in [Vector2.ZERO, Vector2(r.size.x - 6, 0), Vector2(0, r.size.y - 6), Vector2(r.size.x - 6, r.size.y - 6)]:
+				draw_rect(Rect2(r.position + c, Vector2(6, 6)), bord)
+			draw_string(f, Vector2(r.position.x, r.position.y + 22), OPTS[i][0], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 11,
+				Color(1.8, 0.55, 0.55) if hov else Color(0.95, 0.9, 1.0))
+			draw_string(f, Vector2(r.position.x + 8, r.position.y + 40), OPTS[i][1], HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 16, 6, Color(0.7, 0.64, 0.76))
+		draw_string(f, Vector2(0, 330), "esc — resume", HORIZONTAL_ALIGNMENT_CENTER, 640, 7, Color(0.6, 0.55, 0.7))
+
 class DraftUI extends Control:
 	var m: Node2D   # main
 	var hover := -1
@@ -4480,6 +4548,19 @@ func _crusade_button(label: String, win: bool) -> void:
 	end_label = label
 	end_win = win
 
+func _pause_action(i: int) -> void:
+	get_tree().paused = false
+	pause_ui.visible = false
+	Engine.time_scale = 1.0
+	hitstop_until = 0
+	match i:
+		1:
+			Global.goto("res://main.tscn")
+		2:
+			if Global.mode == "crusade":
+				Global.save_crusade()
+			Global.goto("res://menu.tscn")
+
 func _end_click() -> void:
 	if over_t >= 0.35:
 		_end_advance()
@@ -4526,8 +4607,9 @@ func _input(e: InputEvent) -> void:
 			return
 	if over and e.is_action_pressed("restart"):
 		Global.goto("res://main.tscn")
-	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
-		Global.goto("res://menu.tscn")
+	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and not get_tree().paused:
+		get_tree().paused = true
+		pause_ui.visible = true
 
 func _boom(p: Vector2, n: int, col: Color, sp: float) -> void:
 	for i in n:
@@ -4564,6 +4646,8 @@ func _build_hud() -> void:
 	add_child(dlayer)
 	draft_ui = DraftUI.new(self)
 	dlayer.add_child(draft_ui)
+	pause_ui = PauseUI.new(self)
+	dlayer.add_child(pause_ui)
 	hud.score = _label(layer, Vector2(10, 4), 16, Color("#e8f0ff"))
 	hud.combo = _label(layer, Vector2(10, 24), 11, Color("#ff4d78"))
 	hud.biolbl = _label(layer, Vector2(10, 40), 8, Color("#8ad08a"))

@@ -189,9 +189,9 @@ func _scene() -> void:
 
 func _god_figure(i: int, gp: Vector2, awake: bool, sc: float = 1.0) -> void:
 	var col: Color = ROSTER[i].col
-	if awake:
-		draw_circle(gp + Vector2(0, -40 * sc), 58.0 * sc, Color(col.r, col.g, col.b, 0.07))
-		draw_rect(Rect2(gp.x - 40 * sc, gp.y + 24 * sc, 80 * sc, 3), Color(col.r, col.g, col.b, 0.25))
+	# even asleep, a god is not invisible
+	draw_circle(gp + Vector2(0, -40 * sc), 52.0 * sc, Color(col.r, col.g, col.b, 0.10 if awake else 0.045))
+	draw_rect(Rect2(gp.x - 40 * sc, gp.y + 24 * sc, 80 * sc, 3), Color(col.r, col.g, col.b, 0.25 if awake else 0.10))
 	match i:
 		0:
 			draw_circle(gp + Vector2(0, -38 * sc), 26.0 * sc, Color(0.9, 0.12, 0.18, 0.13))
@@ -200,8 +200,8 @@ func _god_figure(i: int, gp: Vector2, awake: bool, sc: float = 1.0) -> void:
 				var ma: float = mm * 2.4 + t * (0.9 if awake else 0.35)
 				var mp := gp + Vector2(0, -38 * sc) + Vector2(cos(ma), sin(ma * 1.3)) * (9.0 + fmod(mm * 5.3, 15.0)) * sc
 				draw_line(mp, mp + Vector2(2.5, 1), Color(1.6, 0.35, 0.4), 1.0)
-			if awake:
-				draw_circle(gp + Vector2(8 * sc, -44 * sc), 3.5 * sc, Color(1.8, 1.1, 0.3))
+			draw_circle(gp + Vector2(8 * sc, -44 * sc), 3.5 * sc,
+				Color(1.8, 1.1, 0.3) if awake else Color(1.2, 0.75, 0.25, 0.7))
 		1:
 			draw_circle(gp + Vector2(0, -26 * sc), 15.0 * sc, Color("#0e0f18"))
 			for wg in [-1.0, 1.0]:
@@ -212,8 +212,8 @@ func _god_figure(i: int, gp: Vector2, awake: bool, sc: float = 1.0) -> void:
 				var hp4 := gp + Vector2((hh - 1) * 13.0, -62.0 + sin(t * 2.0 + hh) * 2.0) * sc
 				draw_line(gp + Vector2((hh - 1) * 5.0, -38.0) * sc, hp4, Color("#0e0f18"), 4.0 * sc)
 				draw_circle(hp4, 4.0 * sc, Color("#161826"))
-				if awake:
-					draw_circle(hp4 + Vector2(2 * sc, 0), 1.3, Color(1.2, 2.0, 2.6))
+				draw_circle(hp4 + Vector2(2 * sc, 0), 1.3,
+					Color(1.2, 2.0, 2.6) if awake else Color(0.7, 1.2, 1.6, 0.7))
 			if awake and randf() < 0.08:
 				draw_line(gp + Vector2(randf_range(-20, 20), -50) * sc, gp + Vector2(randf_range(-26, 26), 10) * sc,
 					Color(1.4, 1.9, 2.4, 0.7), 1.0)
@@ -225,8 +225,9 @@ func _god_figure(i: int, gp: Vector2, awake: bool, sc: float = 1.0) -> void:
 				draw_line(prev, npt, Color(0.10, 0.48, 0.47), 7.0 * sc * (1.0 - absf(f4 - 0.5)))
 				prev = npt
 			draw_circle(prev + Vector2(2, -4) * sc, 5.0 * sc, Color(0.23, 0.72, 0.66))
+			draw_circle(prev + Vector2(4, -5) * sc, 1.5,
+				Color(2.4, 1.5, 0.3) if awake else Color(1.4, 0.9, 0.25, 0.75))
 			if awake:
-				draw_circle(prev + Vector2(4, -5) * sc, 1.5, Color(2.4, 1.5, 0.3))
 				for fth in 4:
 					draw_line(gp + Vector2(-18 + fth * 10.0, -42.0) * sc, gp + Vector2(-22 + fth * 10.0, -52.0) * sc,
 						Color(0.9, 0.35, 0.2), 1.5)
@@ -238,9 +239,10 @@ func _god_figure(i: int, gp: Vector2, awake: bool, sc: float = 1.0) -> void:
 				draw_line(gp + Vector2((tn - 2.5) * 3.2, -40) * sc,
 					gp + Vector2((tn - 2.5) * 4.0 + sin(t * 1.8 + tn) * 2.0, -28 + (tn % 2) * 4) * sc,
 					Color(0.04, 0.13, 0.15), 2.0 * sc)
-			if awake and fmod(t, 5.0) < 4.7:
-				draw_circle(gp + Vector2(-3, -44) * sc, 1.6 * sc, Color(1.3, 2.4, 2.2))
-				draw_circle(gp + Vector2(3, -44) * sc, 1.6 * sc, Color(1.3, 2.4, 2.2))
+			if fmod(t, 5.0) < 4.7:
+				var ec: Color = Color(1.3, 2.4, 2.2) if awake else Color(0.7, 1.3, 1.2, 0.75)
+				draw_circle(gp + Vector2(-3, -44) * sc, 1.6 * sc, ec)
+				draw_circle(gp + Vector2(3, -44) * sc, 1.6 * sc, ec)
 		4:
 			draw_colored_polygon(PackedVector2Array([gp + Vector2(16, 0) * sc, gp + Vector2(17, -26) * sc,
 				gp + Vector2(7, -44) * sc, gp + Vector2(-3, -48) * sc, gp + Vector2(-15, -34 + sin(t * 1.6) * 2.0) * sc,
@@ -250,8 +252,8 @@ func _god_figure(i: int, gp: Vector2, awake: bool, sc: float = 1.0) -> void:
 			for lg in 3:
 				draw_line(gp + Vector2(-10 + lg * 8.0, 0) * sc, gp + Vector2(-10 + lg * 8.0, -10) * sc,
 					Color(0.88, 0.83, 0.66), 2.0 * sc)
-			if awake:
-				draw_circle(gp + Vector2(-1, -43) * sc, 1.0, Color(1.9, 1.6, 0.6))
+			draw_circle(gp + Vector2(-1, -43) * sc, 1.0,
+				Color(1.9, 1.6, 0.6) if awake else Color(1.2, 1.0, 0.4, 0.75))
 
 func _draw() -> void:
 	_scene()
@@ -302,8 +304,9 @@ func _draw() -> void:
 				var gx: float = 76.0 + i * 122.0
 				var awake: bool = hover == i
 				_god_figure(i, Vector2(gx, 240.0), awake)
+				var nc: Color = ROSTER[i].col
 				draw_string(ui_font, Vector2(gx - 55, 284), ROSTER[i].name, HORIZONTAL_ALIGNMENT_CENTER, 110, 9,
-					ROSTER[i].col if awake else Color(0.8, 0.75, 0.85))
+					nc if awake else Color(nc.r * 0.55 + 0.3, nc.g * 0.55 + 0.3, nc.b * 0.55 + 0.3))
 				if awake:
 					draw_string(ui_font, Vector2(gx - 55, 300), ROSTER[i].sub, HORIZONTAL_ALIGNMENT_CENTER, 110, 7, Color(0.85, 0.8, 0.9))
 					draw_string(ui_font, Vector2(gx - 55, 314), ROSTER[i].kit, HORIZONTAL_ALIGNMENT_CENTER, 110, 6, Color(0.7, 0.65, 0.75))
